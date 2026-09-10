@@ -1,1 +1,2 @@
-# service-public-energie-CERES
+Ce dépôt GitHub s'inscrit dans le cadre du projet de recherche sur "les évolutions du service public de l'énergie" en France, porté par le CERES sous la direction de Marc Fleurbaey et Noé Kabouche.
+Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 2 000 individus) à propos de leur rapport au service public de l'électricité.
