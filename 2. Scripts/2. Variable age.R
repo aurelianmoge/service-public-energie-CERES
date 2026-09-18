@@ -1,5 +1,5 @@
-rm(list=ls())
-gc()
+# Pas de rm(list=ls()) en tête : ce script est fait pour être sourcé par
+# d'autres (4. Variable zone.R, le redressement), et effacerait leur environnement.
 
 # Construction d'une variable d'âge unique et des tranches d'âge, pour les
 # questionnaires longs comme courts et pour les deux vagues.
