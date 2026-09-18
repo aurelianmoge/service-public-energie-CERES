@@ -109,11 +109,13 @@ v_cramer <- function(tab) {
 }
 round(v_cramer(tab_croise), 3)  # 0.603, liaison forte
 
-# Les combinaisons franchement contradictoires
+# Les combinaisons franchement contradictoires : un hameau déclaré urbain, ou
+# une grande ville déclarée rurale. Les "village + urbain" n'en font pas partie :
+# l'INSEE classe 14.5 % de la population des villages en urbain (voir le script 4).
 incoherences <- enquete |>
-  filter((taille %in% c("Hameau", "Village") & zone == "Urbain") |
-         (taille == "Grande ville"           & zone == "Rural"))
-nrow(incoherences)  # 56 répondants, soit 1.7 %
+  filter((taille == "Hameau"       & zone == "Urbain") |
+         (taille == "Grande ville" & zone == "Rural"))
+nrow(incoherences)  # 40 répondants
 
 # Conclusion : la variable est bien remplie et cohérente.
 
@@ -206,11 +208,17 @@ dissimilarite(comparaison_taille$observe, comparaison_taille$cible)  # 21.0
 # non-réponses), cohérente avec la taille de commune déclarée, et intéressante
 # en soi puisqu'elle dit comment les gens se situent.
 #
-# Mais elle ne peut pas servir au redressement. Caler suppose une cible de
-# population à atteindre ; or aucune correspondance avec la nomenclature INSEE
-# ne rapproche la répartition déclarée de la répartition réelle. On imposerait
-# donc à l'échantillon une structure qu'aucune référence ne valide, et comme
-# les poids sont globaux, l'erreur se propagerait à toutes les estimations.
+# Mais telle quelle, à trois modalités, elle ne peut pas servir au redressement.
+# Caler suppose une cible de population à atteindre ; or aucune correspondance
+# avec la nomenclature INSEE ne rapproche la répartition déclarée de la
+# répartition réelle. On imposerait donc à l'échantillon une structure qu'aucune
+# référence ne valide, et comme les poids sont globaux, l'erreur se propagerait
+# à toutes les estimations.
+#
+# Suite : le script 4 (4. Variable zone.R) construit une version à deux
+# modalités, en reclassant les périurbains selon leur taille de commune. Cette
+# version-là est utilisable pour le redressement, sur une cible corrigée de la
+# perception.
 #
 # Une limite à garder en tête :
 #   - la cible est calculée sur la population totale, pas sur les 18 ans et
