@@ -34,10 +34,10 @@ pop_densite <- read.xlsx("1. Data/Public data/grille_densite_2026.xlsx",
   filter(!startsWith(CODGEO, "976"))  # on écarte Mayotte, comme dans le redressement
 
 # Population des 15 ans et plus (2022) par commune stratifiée par catégorie d'âge, sexe et statut d'emploi
-pop_insee <- read.csv("1. Data/Public data/TD_ACT1V3_2022.csv", sep=";")
+pop_insee <- read.csv("1. Data/Public data/TD_POP1B_2022.csv", sep=";")
 colnames(pop_insee)
 pop_insee <- pop_insee |> 
-  filter(AGED65 >= 18)
+  filter(AGED100 >= 18)
 
 # On fusionne les deux grilles INSEE
 pop_densite <- pop_densite |> 
@@ -46,10 +46,10 @@ pop_densite <- pop_densite |>
 # On crée les catégories d'âge
 pop_densite <- pop_densite |> 
   mutate(AGE_large = case_when(
-    AGED65 < 35 ~ "18-34",
-    AGED65 >= 35 & AGED65 < 50 ~ "35-49",
-    AGED65 >= 50 & AGED65 < 65 ~ "50-64",
-    AGED65 >= 65 ~ "65+",
+    AGED100 < 35 ~ "18-34",
+    AGED100 >= 35 & AGED100 < 50 ~ "35-49",
+    AGED100 >= 50 & AGED100 < 65 ~ "50-64",
+    AGED100 >= 65 ~ "65+",
     TRUE ~ NA))
 
 # De même dans le df
@@ -188,9 +188,9 @@ quantile(
 ESS <- sum(w)^2 / sum(w^2)
 c(
   n = length(w), # 3185 individus dans la base
-  ESS = ESS, # ESS = 2244
-  # (en termes de précision statistique, c'est "comme si" on avait 2244 individus, à cause de la variance des poids)
-  taux_ESS = ESS / length(w) # le taux est de 0,70 
+  ESS = ESS, # ESS = 3125
+  # (en termes de précision statistique, c'est "comme si" on avait 3125 individus, à cause de la variance des poids)
+  taux_ESS = ESS / length(w) # le taux est de 0,98
 )
 
 
@@ -201,14 +201,14 @@ c(
 df$poids <- weights(design_rake)
 
 # On vérifie la structure de la variable
-summary(df$poids)
-sum(df$poids) # on a un total de 32M d'individus (contre 33M dans la base insee initiale, à cause des suppressions de NAs, etc.)
+summary(df$poids) # entre 13 174 et 19 212
+sum(df$poids) # on a un total de 53 483 601 d'individus (soit la population française des 18+)
 
 # On crée un poids normalisé
 df <- df |> 
   mutate(poids_norm = poids * nrow(df) / sum(poids))
 
 # On vérifie la structure de la variable
-summary(df$poids_norm) # les individus représentent entre 0.04 et 2 individus à présent
+summary(df$poids_norm) # chaque individu représente entre 0.78 et 1.14 individu à présent
 sum(df$poids_norm) # on a bien un total de 3 185 individus maintenant
 

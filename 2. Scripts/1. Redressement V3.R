@@ -37,7 +37,7 @@ pop_densite <- read.xlsx("1. Data/Public data/grille_densite_2026.xlsx",
   filter(!startsWith(CODGEO, "976"))  # on écarte Mayotte, comme dans le redressement
 
 # Population des 15 ans et plus (2022) par commune stratifiée par catégorie d'âge, sexe et statut d'emploi
-pop_insee <- read.csv("1. Data/Public data/TD_ACT1V3_2022.csv", sep=";")
+pop_insee <- read.csv("1. Data/Public data/TD_POP1B_2022.csv", sep=";")
 colnames(pop_insee)
 
 # On fusionne les deux grilles INSEE
@@ -45,18 +45,22 @@ pop_densite <- pop_densite |>
   left_join(pop_insee, by="CODGEO")
 
 pop_densite <- pop_densite |> 
-  mutate(tranche_bilendi = case_when(
-    AGED65 < 25 ~ "18-24",
-    AGED65 >= 25 & AGED65 < 30 ~ "25-29",
-    AGED65 >= 30 & AGED65 < 35 ~ "30-34",
-    AGED65 >= 35 & AGED65 < 40 ~ "35-39",
-    AGED65 >= 40 & AGED65 < 45 ~ "40-44",
-    AGED65 >= 45 & AGED65 < 50 ~ "45-49",
-    AGED65 >= 50 & AGED65 < 55 ~ "50-54",
-    AGED65 >= 55 & AGED65 < 60 ~ "55-59",
-    AGED65 >= 60 & AGED65 < 65 ~ "60-64",
-    AGED65 >= 65 ~ "65+",
-    TRUE ~ NA))
+  filter(AGED100 >= 18) |> 
+  mutate(
+    tranche_bilendi = case_when(
+      AGED100 < 25 ~ "18-24",
+      AGED100 < 30 ~ "25-29",
+      AGED100 < 35 ~ "30-34",
+      AGED100 < 40 ~ "35-39",
+      AGED100 < 45 ~ "40-44",
+      AGED100 < 50 ~ "45-49",
+      AGED100 < 55 ~ "50-54",
+      AGED100 < 60 ~ "55-59",
+      AGED100 < 65 ~ "60-64",
+      AGED100 >= 65 ~ "65+",
+      TRUE ~ NA_character_
+    )
+  )
 
 # On groupe par sexe, âge et type de commune et on calcule les effectifs croisés
 pop_densite_group <- pop_densite |> 
@@ -167,7 +171,7 @@ design_rake <- rake(
 # On regarde les poids extrêmes
 idx <- order(weights(design_rake), decreasing = TRUE)[1:10]
 df_design$variables[idx, c(
-  "AgeTranche",
+  "tranche_bilendi",
   "SEXE",
   "zone3"
 )] # rien de choquant a priori
@@ -185,10 +189,10 @@ quantile(
 # On calcule l'Effective Sample Size (ESS)
 ESS <- sum(w)^2 / sum(w^2)
 c(
-  n = length(w), # 2812 individus dans la base
-  ESS = ESS, # ESS = 3193
-  # (en termes de précision statistique, c'est "comme si" on avait 1720 individus, à cause de la variance des poids)
-  taux_ESS = ESS / length(w) # le taux est de 0,54 (plutôt instable mais ça va vu le nombre de marges utilisées)
+  n = length(w), # 3193 individus dans la base
+  ESS = ESS, # ESS = 2496
+  # (en termes de précision statistique, c'est "comme si" on avait 2496 individus, à cause de la variance des poids)
+  taux_ESS = ESS / length(w) # le taux est de 0,78 
 )
 
 
@@ -266,15 +270,15 @@ summary(w_bis)
 quantile(
   w_bis,
   probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1)
-)
+) # de 11 000 à 42 000 environ
 
 # On calcule l'Effective Sample Size (ESS)
 ESS_bis <- sum(w_bis)^2 / sum(w_bis^2)
 c(
   n = length(w_bis), # 3193 individus dans la base
-  ESS_bis = ESS_bis, # ESS = 1814
-  # (en termes de précision statistique, c'est "comme si" on avait 1814 individus, à cause de la variance des poids)
-  taux_ESS_bis = ESS_bis / length(w_bis) # le taux est de 0,56 (plutôt instable mais ça va vu le nombre de marges utilisées)
+  ESS_bis = ESS_bis, # ESS = 2521
+  # (en termes de précision statistique, c'est "comme si" on avait 2521 individus, à cause de la variance des poids)
+  taux_ESS_bis = ESS_bis / length(w_bis) # le taux est de 0,79
 )
 
 
@@ -322,7 +326,7 @@ diagnostic <- sample_cells |>
   ) |>
   arrange(desc(ratio_pop_sample))
 
-# On trouve un problème global chez les moins de 65 ans, et dans le périurbain
+# On trouve un problème global dans le périurbain
 diagnostic
 
 
@@ -396,7 +400,7 @@ summary(w_ter)
 # On regarde les quantiles
 quantile(
   w_ter,
-  probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1) # (de 400 à 20 000)
+  probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1) # (de 13 174 à 19 212)
 )
 # (dans w_bis, on était entre 300 et 44 000, on est plutôt mieux maintenant !)
 
@@ -404,9 +408,9 @@ quantile(
 ESS_ter <- sum(w_ter)^2 / sum(w_ter^2)
 c(
   n = length(w_ter), # 3185 individus dans la base
-  ESS_ter = ESS_ter, # ESS = 2244
-  # (en termes de précision statistique, c'est "comme si" on avait 2244 individus, à cause de la variance des poids)
-  taux_ESS_ter = ESS_ter / length(w_ter) # le taux est de 0,70 (beaucoup mieux que le 0,55 initial !)
+  ESS_ter = ESS_ter, # ESS = 3125
+  # (en termes de précision statistique, c'est "comme si" on avait 3125 individus, à cause de la variance des poids)
+  taux_ESS_ter = ESS_ter / length(w_ter) # le taux est de 0,98 (mieux que le 0,78 initial !)
 )
 
 ### On fait des diagnostics
@@ -425,8 +429,6 @@ df_w_ter |>
     .groups = "drop"
   ) |>
   arrange(desc(poids_moyen))
-
-# Interprétation : le périurbain pose le plus de problèmes
 
 ### On regarde le nombre d'individus par case
 
@@ -453,7 +455,7 @@ diagnostic_ter <- sample_cells_ter |>
   ) |>
   arrange(desc(ratio_pop_sample))
 
-# On trouve un problème global chez les moins de 65 ans, et dans le périurbain
+# Ca a l'air pas trop mal
 diagnostic_ter
 
 
@@ -513,17 +515,17 @@ summary(w_quat)
 # On regarde les quantiles
 quantile(
   w_quat,
-  probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1) # (de 400 à 26 000)
+  probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1) # (de 12 377 à 25 731)
 )
-# (dans w_ter, on était entre 400 et 20 000, on est plutôt moins bien ici !)
+# (dans w_ter, on était entre 13 174 et 19 212, on est plutôt moins bien ici !)
 
 # On calcule l'Effective Sample Size (ESS)
 ESS_quat <- sum(w_quat)^2 / sum(w_quat^2)
 c(
   n = length(w_quat), # 3185 individus dans la base
-  ESS_quat = ESS_quat, # ESS = 2132
-  # (en termes de précision statistique, c'est "comme si" on avait 2132 individus, à cause de la variance des poids)
-  taux_ESS_quat = ESS_quat / length(w_quat) # le taux est de 0,67 (mieux que le 0,55 initial, moins bien que le 0,7 final)
+  ESS_quat = ESS_quat, # ESS = 3097
+  # (en termes de précision statistique, c'est "comme si" on avait 3097 individus, à cause de la variance des poids)
+  taux_ESS_quat = ESS_quat / length(w_quat) # le taux est de 0,97
 )
 
 ### On fait des diagnostics
