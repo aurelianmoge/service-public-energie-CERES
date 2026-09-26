@@ -123,12 +123,6 @@ df <- droplevels(df)
 # On crée un poids initial uniforme
 df$poids_initial <- 1
 
-# On crée un objet de type "survey"
-df_design <- svydesign(
-  ids = ~1,
-  weights = ~poids_initial,
-  data = df
-)
 
 ### On construit les tableaux avec les distributions marginales
 
@@ -164,6 +158,12 @@ pop_joint <- pop_densite_group |>
   group_by(strate) |>
   summarise(Freq = sum(pop_strat), .groups = "drop")
 
+# On crée un objet de type "survey"
+df_design <- svydesign(
+  ids = ~1,
+  weights = ~poids_initial,
+  data = df
+)
 
 # On utilise la fonction rake() de survey pour créer les poids
 design_post <- postStratify(
