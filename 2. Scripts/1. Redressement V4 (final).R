@@ -147,19 +147,29 @@ tab_pop_croisee_age <- pop_densite_group |>
   group_by(AGE_large) |> 
   summarise(Freq = sum(pop_strat, na.rm = TRUE))
 
+
+## Puis avec les distributions jointes
+
+df <- df |>
+  mutate(strate = interaction(
+    AGE_large, SEXE, zone2,
+    drop = TRUE
+  ))
+
+pop_joint <- pop_densite_group |>
+  mutate(strate = interaction(
+    AGE_large, SEXE, zone2,
+    drop = TRUE
+  )) |>
+  group_by(strate) |>
+  summarise(Freq = sum(pop_strat), .groups = "drop")
+
+
 # On utilise la fonction rake() de survey pour créer les poids
-design_rake <- rake(
+design_post <- postStratify(
   df_design,
-  sample.margins = list(
-    ~AGE_large,
-    ~SEXE,
-    ~zone2
-  ),
-  population.margins = list(
-    tab_pop_croisee_age,
-    tab_pop_croisee_sexe,
-    tab_pop_croisee_typeco
-  )
+  strata = ~strate,
+  population = pop_joint
 )
 
 
@@ -167,30 +177,30 @@ design_rake <- rake(
 #---------------------------------------
 
 # On regarde les poids extrêmes
-idx <- order(weights(design_rake), decreasing = TRUE)[1:10]
-df_design$variables[idx, c(
+idx <- order(weights(design_post), decreasing = TRUE)[1:10]
+design_post$variables[idx, c(
   "AGE_large",
   "SEXE",
   "zone2"
 )]
 
 # On regarde la distribution des poids
-w <- weights(design_rake)
+w <- weights(design_post)
 summary(w)
 
 # On regarde les quantiles
 quantile(
   w,
   probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1)
-)
+) # de 10 314 à 24 651
 
 # On calcule l'Effective Sample Size (ESS)
 ESS <- sum(w)^2 / sum(w^2)
 c(
   n = length(w), # 3185 individus dans la base
   ESS = ESS, # ESS = 3125
-  # (en termes de précision statistique, c'est "comme si" on avait 3125 individus, à cause de la variance des poids)
-  taux_ESS = ESS / length(w) # le taux est de 0,98
+  # (en termes de précision statistique, c'est "comme si" on avait 2985 individus, à cause de la variance des poids)
+  taux_ESS = ESS / length(w) # le taux est de 0,94
 )
 
 
@@ -198,10 +208,10 @@ c(
 #--------------------------------
 
 # On crée une variable avec les poids (l'ordre est le même)
-df$poids <- weights(design_rake)
+df$poids <- weights(design_post)
 
 # On vérifie la structure de la variable
-summary(df$poids) # entre 13 174 et 19 212
+summary(df$poids) # entre 10 315 et 24 651
 sum(df$poids) # on a un total de 53 483 601 d'individus (soit la population française des 18+)
 
 # On crée un poids normalisé
@@ -209,6 +219,6 @@ df <- df |>
   mutate(poids_norm = poids * nrow(df) / sum(poids))
 
 # On vérifie la structure de la variable
-summary(df$poids_norm) # chaque individu représente entre 0.78 et 1.14 individu à présent
+summary(df$poids_norm) # chaque individu représente entre 0.61 et 1.47 individu à présent
 sum(df$poids_norm) # on a bien un total de 3 185 individus maintenant
 
