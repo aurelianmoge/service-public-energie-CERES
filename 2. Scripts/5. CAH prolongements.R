@@ -1,10 +1,3 @@
-# ============================================================================
-# PROLONGEMENTS DE L'AFM : SERVICE PUBLIC, FAMD ET STABILITE DE LA CAH
-# A lancer dans la MEME session, APRES « 5. AFM et CAH.R ».
-# Les répondants, leurs poids et les recodages communs sont ainsi identiques.
-# Sorties : 3. Outputs/AFM/sensibilite
-# ============================================================================
-
 #### 0. Objets nécessaires et paramètres ####
 
 attendus <- c("df_afm", "base_active", "actives_imp", "base_afm",

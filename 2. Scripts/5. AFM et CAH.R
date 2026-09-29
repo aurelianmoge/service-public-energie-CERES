@@ -1,24 +1,6 @@
-# Exécuter depuis la racine du projet. Réutiliser le redressement s'il est chargé.
+# Si le df n'est pas déjà dans l'environnement, on charge le script du redressement qui crée le df
 if (!exists("df") || !"poids_norm" %in% names(df))
   source("2. Scripts/1. Redressement V4 (final).R")
-
-# ============================================================================
-# AFM DES RAPPORTS AU SERVICE PUBLIC DE L'ENERGIE
-# Le redressement est chargé automatiquement si nécessaire.
-# L'analyse porte sur les répondants du questionnaire long déjà redressés.
-#
-# Question : comment s'articulent connaissance du secteur, conception du
-# service public, préférences de transition et intérêt pour l'autoconsommation ?
-# Les propriétés sociales et matérielles décrivent l'espace sans le construire.
-#
-# Installation préalable, une seule fois :
-# install.packages(c("FactoMineR", "missMDA", "ggplot2", "ggrepel"))
-#
-# L'AFM équilibre quatre thèmes définis sociologiquement. Une FAMD sans groupes
-# laisserait chaque question peser seule ; une ACM demanderait de discrétiser
-# les échelles 1-5. La CAH est une typologie exploratoire, dépendante des axes
-# conservés, du nombre de classes et des réponses imputées.
-# ============================================================================
 
 #### 0. Paramètres et contrôles ####
 
