@@ -101,7 +101,6 @@ pop_densite_group <- pop_densite_group |>
 
 # Sur le sexe
 table(df$SEXE)
-df <- df |> filter(!SEXE %in% c("Ne sait pas / Ne se prononce pas", "Autre"))
 df <- df |> filter(!is.na(SEXE))
 
 # Sur le type de commune
@@ -144,11 +143,44 @@ tab_pop_croisee_age <- pop_densite_group |>
 
 ## Puis avec les distributions jointes
 
+# D'abord, on crée une variable avec le sexe imputé pour tout le monde (pour le redressement uniquement !)
+# (autrement dit, on garde les 'Autres', mais on les impute aléatoirement juste pour le redressement)
+
+# Sexe déclaré : on le conserve tel quel pour les analyses
 df <- df |>
-  mutate(strate = interaction(
-    AGE_large, SEXE, zone2,
-    drop = TRUE
-  ))
+  mutate(SEXE = factor(G1Q00001))
+
+# Sexe utilisé uniquement pour le redressement
+set.seed(1234)
+
+df <- df |>
+  mutate(
+    SEXE_redress = case_when(
+      G1Q00001 == "Homme" ~ "Homme",
+      G1Q00001 == "Femme" ~ "Femme",
+      
+      # Imputation 50/50 pour les autres modalités
+      G1Q00001 %in% c(
+        "Autre",
+        "Ne sait pas / Ne se prononce pas"
+      ) ~ sample(
+        c("Homme", "Femme"),
+        size = n(),
+        replace = TRUE
+      ),
+      
+      TRUE ~ NA_character_
+    ),
+    SEXE_redress = factor(
+      SEXE_redress,
+      levels = c("Homme", "Femme")
+    )
+  )
+
+df <- df |>
+  mutate(
+    strate = interaction(AGE_large, SEXE_redress, zone2, drop = TRUE)
+  )
 
 pop_joint <- pop_densite_group |>
   mutate(strate = interaction(

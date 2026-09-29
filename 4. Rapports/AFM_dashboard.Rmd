@@ -1,0 +1,589 @@
+---
+title: "Énergie et service public"
+subtitle: "Espace des attitudes, typologie et sensibilité des résultats"
+lang: fr
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: false
+    self_contained: true
+    df_print: paged
+params:
+  recalculer: true
+  dossier: "../3. Outputs/AFM"
+---
+
+```{r reconstruction, include=FALSE}
+# Mode rapide : lecture des sorties existantes.
+# Mode complet : préparation, redressement, AFM, CAH et comparaisons dans
+# un processus R distinct. Les scripts historiques utilisent source() dans
+# l'environnement global ; le processus distinct garantit leur isolation.
+if (isTRUE(params$recalculer)) {
+  racine <- normalizePath("..", mustWork = TRUE)
+  sortie_attendue <- normalizePath(file.path(racine, "3. Outputs/AFM"), mustWork = FALSE)
+  if (normalizePath(params$dossier, mustWork = FALSE) != sortie_attendue)
+    stop("Le recalcul complet écrit dans 3. Outputs/AFM : conserver le dossier par défaut.")
+  statut <- system2(file.path(R.home("bin"), "Rscript"),
+    args = c("--vanilla", shQuote(file.path(racine, "4. Rapports/generer_dashboard.R")),
+             "--analyses", shQuote(racine)))
+  if (statut != 0L) stop("Le recalcul a échoué : consulter le journal R avant le rendu.")
+}
+```
+
+```{r preparation, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 10, fig.height = 5.5, dpi = 140)
+library(ggplot2)
+library(ggrepel)
+
+# Libellés communs aux cartes, tableaux et profils.
+libelles_sociaux <- c(
+  SEXE = "Sexe", AGE_large = "Âge", G1Q00003 = "Diplôme",
+  zone2 = "Territoire", G1Q00009 = "Gestion du contrat",
+  G2Q00009 = "Difficultés de paiement", G5Q00005 = "Changement de fournisseur",
+  vague = "Vague d'enquête"
+)
+libelles_numeriques <- c(
+  interet_energie = "Intérêt pour l'énergie",
+  score_connaissance = "Connaissance des acteurs",
+  centralisation = "Décentralisation (5)",
+  concurrence = "Concurrence (5)",
+  disposition_offre_verte = "Payer plus pour le vert (5)"
+)
+dossier <- normalizePath(params$dossier, mustWork = TRUE)
+lire <- function(nom) read.csv2(file.path(dossier, nom), check.names = FALSE)
+a <- readRDS(file.path(dossier, "resultat_afm.rds"))
+inertie <- lire("03_inertie.csv")
+taille <- lire("11_taille_classes.csv")
+indicateurs <- lire("00_indicateurs.csv")
+profils <- lire("14_profils_classes.csv")
+ari <- lire("sensibilite/05_stabilite_partitions_ARI.csv")
+reference <- "AFM_5axes_4classes"
+fmt <- function(x, digits = 1) format(round(x, digits), decimal.mark = ",", big.mark = " ", trim = TRUE)
+theme_set(theme_minimal(base_size = 12) + theme(panel.grid.minor = element_blank(),
+  plot.title = element_text(face = "bold"), plot.margin = margin(12, 18, 14, 12)))
+tableau <- function(x, digits = 2) {
+  num <- vapply(x, is.numeric, logical(1))
+  x[num] <- lapply(x[num], round, digits = digits)
+  DT::datatable(x, rownames = FALSE, filter = "top", extensions = "Buttons",
+    options = list(pageLength = 8, scrollX = TRUE, dom = "Bfrtip",
+      language = list(search = "Rechercher :", lengthMenu = "Afficher _MENU_ lignes",
+        info = "Lignes _START_ à _END_ sur _TOTAL_", infoEmpty = "Aucune ligne",
+        infoFiltered = "(sur _MAX_ lignes au total)", zeroRecords = "Aucun résultat",
+        paginate = list(first = "Début", previous = "Précédent", "next" = "Suivant", last = "Fin")),
+      buttons = list(list(extend = "copy", text = "Copier"),
+                     list(extend = "csv", text = "Exporter en CSV"))), escape = TRUE)
+}
+```
+
+<style>
+.main-container {max-width:1200px;}
+.cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
+.card {flex:1; min-width:170px; padding:1rem; background:#eff5f8; border-top:4px solid #235e86; border-radius:6px;}
+.card strong {display:block; font-size:1.9rem; color:#235e86;}
+.nav-tabs {margin-bottom:1.5rem;}
+</style>
+
+<div class="cards">
+<div class="card"><strong>`r fmt(indicateurs$n, 0)`</strong>répondants analysés</div>
+<div class="card"><strong>`r fmt(indicateurs$ESS_Kish, 0)`</strong>effectif de Kish</div>
+<div class="card"><strong>`r fmt(sum(inertie$pourcentage[1:2]))` %</strong>inertie sur le plan 1–2</div>
+<div class="card"><strong>`r nrow(taille)`</strong>classes exploratoires</div>
+</div>
+
+L'AFM met en relation **11 variables réparties en quatre thèmes**. Les caractéristiques
+sociales sont projetées ensuite. La CAH de Ward pondérée utilise cinq axes ; les
+onglets permettent de lire les dimensions, les profils et leur sensibilité.
+Les tableaux sont filtrables, triables et exportables. Les graphiques présentent des
+résultats fixes issus d'une même analyse.
+
+## Résultats {.tabset .tabset-pills}
+
+### Vue d'ensemble
+
+```{r workflow, fig.height=3}
+etapes <- data.frame(x = 1:5, y = 1, texte = c("Questionnaires longs\nPoids du panel", "11 variables\n4 thèm
+                                               es", "Imputation\nAFM pondérée", "Ward pondéré\n5 axes · 4 classes", "Profils observés\nComparaisons"))
+ggplot(etapes, aes(x, y)) +
+  geom_segment(data = data.frame(x=1:4, xend=2:5), aes(x=x+.25, xend=xend-.25, y=1, yend=1),
+               inherit.aes=FALSE, arrow=grid::arrow(length=grid::unit(.15,"cm")), colour="#235e86") +
+  geom_label(aes(label=texte), fill="#eff5f8", size=3.5, label.padding=grid::unit(.5,"lines")) +
+  xlim(.3,5.7) + ylim(.7,1.3) + theme_void()
+```
+
+Les cinq axes retenus représentent **`r fmt(inertie$pourcentage_cumule[5])` %** de
+l'inertie totale. Le plan 1–2 en restitue une partie seulement : les profils des
+classes et les comparaisons complètent sa lecture.
+
+```{r tailles}
+ggplot(taille, aes(factor(classe), part_ponderee_pct)) + geom_col(fill="#235e86", width=.65) +
+  geom_text(aes(label=paste0(fmt(part_ponderee_pct), " %")), vjust=-.4) +
+  scale_y_continuous(expand=expansion(mult=c(0,.15))) +
+  labs(title="Poids des classes dans l'échantillon analysé", x="Classe", y="Part pondérée (%)")
+```
+
+### Dimensions
+
+```{r inertie}
+ggplot(head(inertie, 10), aes(factor(axe), pourcentage)) + geom_col(fill="#235e86") +
+  labs(title="Inertie des dix premiers axes", x="Axe", y="Inertie (%)")
+```
+
+```{r groupes}
+g <- lire("bilan/04_groupes_tous_axes.csv")
+ggplot(g, aes(factor(axe), element, fill=contribution_pct)) + geom_tile(colour="white") +
+  geom_text(aes(label=paste0(fmt(contribution_pct), " %")), size=3.5) +
+  scale_fill_gradient(low="#eff5f8", high="#4285a6") +
+  labs(title="Contribution des thèmes", x="Axe", y=NULL, fill="Contribution (%)")
+```
+
+Pour interpréter un axe, associer **coordonnée** (côté du pôle), **contribution**
+(construction de l'axe), **cos²** (qualité de représentation) et **effectif observé**.
+Le signe des axes est arbitraire. Les contributions des modalités et celles des
+variables numériques se lisent ensemble.
+
+```{r modalites}
+tableau(rbind(lire("05_toutes_modalites_actives.csv")[c("axe","element","coordonnee","contribution_pct","cos2")],
+              lire("07_variables_numeriques.csv")[c("axe","element","coordonnee","contribution_pct","cos2")]))
+```
+
+#### Tous les axes utilisés dans la CAH
+
+La CAH utilise **les cinq axes retenus**, dont les axes 4 et 5 qui ne figurent pas
+sur les cartes 1–2 et 2–3. Le tableau ci-dessous présente jusqu'à quatre éléments
+par pôle et par type, parmi ceux comptant au moins 30 réponses observées. Un rang
+élevé dans cette sélection peut correspondre à une faible contribution absolue :
+lire aussi sa valeur et le cos². Les numéros et signes des axes sont conventionnels.
+
+```{r poles_tous_axes}
+tableau(lire("bilan/03_poles_axes.csv"))
+```
+
+### Cartes des variables {.tabset}
+
+Les **modalités actives** participent à la construction des axes ; les **modalités
+illustratives** décrivent ensuite les positions sociales et matérielles dans cet
+espace. « Illustrative » ne signifie pas « explicative » au sens causal.
+
+Sur les cartes, les cercles rouges représentent les modalités actives et les
+losanges bleus les modalités illustratives. La transparence indique le **cos²
+cumulé sur le plan** : les points les plus pâles sont moins bien représentés.
+Les distances et proximités se lisent avec cette qualité de représentation.
+
+```{r fonctions_cartographiques, include=FALSE}
+# Apparier les libellés de FactoMineR avec les fréquences observées.
+# Certains libellés sont préfixés par le nom de la variable : la comparaison
+# par suffixe doit donc donner un seul résultat pour chaque modalité.
+apparier_modalites <- function(elements, frequences) {
+  vapply(elements, function(element) {
+    indices <- which(endsWith(element, frequences$modalite))
+    if (length(indices) != 1L)
+      stop("Appariement ambigu ou absent pour la modalité : ", element)
+    indices
+  }, integer(1))
+}
+
+frequences_actives <- lire("02_frequences_modalites_observees.csv")
+frequences_illustratives <- lire("08b_frequences_illustratives.csv")
+
+# Une table par plan contient les coordonnées, les effectifs et la qualité
+# de représentation. La contribution n'existe que pour les modalités actives.
+preparer_modalites <- function(axes) {
+  extraire <- function(resultat, statut, frequences, colonne_effectif) {
+    elements <- rownames(resultat$coord)
+    indices <- apparier_modalites(elements, frequences)
+    data.frame(
+      element = elements, variable = frequences$variable[indices],
+      statut = statut, x = resultat$coord[, axes[1]], y = resultat$coord[, axes[2]],
+      cos2_plan = rowSums(resultat$cos2[, axes, drop = FALSE]),
+      contribution_plan = if (statut == "Active")
+        rowSums(resultat$contrib[, axes, drop = FALSE]) else NA_real_,
+      n_observe = frequences[[colonne_effectif]][indices]
+    )
+  }
+  modalites <- rbind(
+    extraire(a$afm$quali.var, "Active", frequences_actives, "n_observe"),
+    extraire(a$afm$quali.var.sup, "Illustrative", frequences_illustratives, "n")
+  )
+  modalites$libelle <- modalites$element
+  for (variable in names(libelles_sociaux)) {
+    prefixe <- paste0(variable, " : ")
+    lignes <- startsWith(modalites$libelle, prefixe)
+    modalites$libelle[lignes] <- paste0(libelles_sociaux[[variable]], " : ",
+      substring(modalites$libelle[lignes], nchar(prefixe) + 1L))
+  }
+  modalites
+}
+
+# Sélection réservée aux étiquettes : jusqu'à 12 actives par contribution et
+# 6 illustratives par cos². Tous les points renseignés restent sur la carte.
+# Le seuil de 30 observations évite de donner la priorité à une modalité rare.
+tracer_modalites <- function(modalites, axes) {
+  points <- modalites[!endsWith(modalites$element, " : Non renseigné"), ]
+  eligibles <- points[points$n_observe >= 30, ]
+  actives <- eligibles[eligibles$statut == "Active", ]
+  illustratives <- eligibles[eligibles$statut == "Illustrative", ]
+  etiquettes <- rbind(
+    head(actives[order(-actives$contribution_plan), ], 12),
+    head(illustratives[order(-illustratives$cos2_plan), ], 6)
+  )
+  # Le placement des étiquettes utilise une graine et un nombre fixe d’itérations.
+  # Une fenêtre carrée laisse de la place aux libellés même si les modalités
+  # sont beaucoup plus dispersées sur un axe que sur l'autre.
+  etendue <- max(diff(range(points$x)), diff(range(points$y)))
+  limites_x <- mean(range(points$x)) + c(-.65, .65) * etendue
+  limites_y <- mean(range(points$y)) + c(-.65, .65) * etendue
+  etiquettes$libelle <- vapply(etiquettes$libelle, function(texte)
+    paste(strwrap(texte, width = 34), collapse = "\n"), character(1))
+  ggplot(points, aes(x, y, colour = statut, shape = statut)) +
+    geom_hline(yintercept = 0, colour = "grey80") +
+    geom_vline(xintercept = 0, colour = "grey80") +
+    geom_point(aes(alpha = cos2_plan), size = 2.5) +
+    geom_text_repel(data = etiquettes, aes(label = libelle),
+      size = 3, seed = 20260927, max.overlaps = Inf,
+      box.padding = .6, max.time = Inf, max.iter = 30000,
+      min.segment.length = 0, show.legend = FALSE) +
+    scale_colour_manual(values = c(Active = "#B34E3F", Illustrative = "#235E86")) +
+    scale_shape_manual(values = c(Active = 16, Illustrative = 18)) +
+    scale_alpha_continuous(limits = c(0, 1), range = c(.2, 1)) +
+    scale_x_continuous(expand = expansion(mult = .2)) +
+    scale_y_continuous(expand = expansion(mult = .2)) +
+    coord_equal(xlim = limites_x, ylim = limites_y) +
+    labs(title = paste0("Modalités actives et illustratives — plan ", paste(axes, collapse = "–")),
+      subtitle = "Étiquettes : modalités actives contributives et illustratives bien représentées",
+      x = paste0("Axe ", axes[1], " (", fmt(inertie$pourcentage[axes[1]]), " %)"),
+      y = paste0("Axe ", axes[2], " (", fmt(inertie$pourcentage[axes[2]]), " %)"),
+      colour = "Statut", shape = "Statut", alpha = "Cos² du plan") +
+    theme(legend.position = "bottom")
+}
+modalites_12 <- preparer_modalites(c(1, 2))
+modalites_23 <- preparer_modalites(c(2, 3))
+```
+
+#### Plan 1–2
+
+```{r modalites_plan_12, fig.width=12, fig.height=9}
+tracer_modalites(modalites_12, c(1, 2))
+```
+
+Les étiquettes sont une sélection de lecture, pas un filtre de l'analyse.
+Les modalités « Non renseigné » sont omises de la carte et conservées dans les
+tables. Les modalités non étiquetées restent visibles.
+
+#### Plan 2–3
+
+```{r modalites_plan_23, fig.width=12, fig.height=9}
+tracer_modalites(modalites_23, c(2, 3))
+```
+
+Ce second plan rend visible l'axe 3, davantage structuré par l'autoconsommation
+et les conceptions du service public. Il complète la lecture du premier plan.
+
+#### Échelles numériques
+
+Le cercle représente les corrélations des échelles et du score avec les axes.
+Les flèches longues sont mieux représentées sur ce plan. Pour les échelles
+concernées, « (5) » indique le sens de la valeur élevée.
+
+```{r cercle_correlations, fig.height=7}
+correlations <- as.data.frame(a$afm$quanti.var$cor[, 1:2, drop = FALSE])
+names(correlations) <- c("x", "y")
+correlations$libelle <- unname(libelles_numeriques[rownames(correlations)])
+angles <- seq(0, 2 * pi, length.out = 240)
+cercle <- data.frame(x = cos(angles), y = sin(angles))
+ggplot() +
+  geom_path(data = cercle, aes(x, y), colour = "grey65") +
+  geom_hline(yintercept = 0, colour = "grey80") +
+  geom_vline(xintercept = 0, colour = "grey80") +
+  geom_segment(data = correlations, aes(x = 0, y = 0, xend = x, yend = y),
+    colour = "#235E86", arrow = grid::arrow(length = grid::unit(.18, "cm"))) +
+  geom_text_repel(data = correlations, aes(x, y, label = libelle),
+    seed = 20260927, max.overlaps = Inf, size = 3.5) +
+  coord_equal(xlim = c(-1.2, 1.2), ylim = c(-1.2, 1.2)) +
+  labs(title = "Échelles actives : cercle des corrélations",
+       x = "Corrélation avec l'axe 1", y = "Corrélation avec l'axe 2")
+```
+
+#### Propriétés sociales
+
+La carte des modalités montre des positions ; le **η² pondéré** mesure l'association
+d'une variable illustrative entière avec chaque axe. Les valeurs affichées sont
+des pourcentages de dispersion de l'axe associés aux catégories de cette variable,
+calculés sur les réponses renseignées. Cette association est descriptive.
+
+```{r associations_sociales, fig.height=5}
+associations <- lire("08c_variables_illustratives_eta2.csv")
+associations$libelle <- unname(libelles_sociaux[associations$variable])
+associations$pourcentage <- 100 * associations$eta2_pondere
+ggplot(associations, aes(factor(axe), libelle, fill = pourcentage)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = paste0(fmt(pourcentage), " %")), size = 3.5) +
+  scale_fill_gradient(low = "#eff5f8", high = "#4285a6") +
+  labs(title = "Association des propriétés sociales avec les axes",
+       x = "Axe", y = NULL, fill = "η² (%)")
+```
+
+#### Données des cartes
+
+Coordonnées et indicateurs de toutes les modalités, y compris celles sans
+étiquette sur la carte. Les contributions illustratives sont laissées vides,
+car ces modalités ne construisent pas les axes. La contribution du plan est la
+somme des contributions aux deux axes ; elle sert à sélectionner les étiquettes.
+
+```{r tables_modalites}
+donnees_cartes <- rbind(
+  data.frame(plan = "1–2", modalites_12),
+  data.frame(plan = "2–3", modalites_23)
+)
+tableau(donnees_cartes[c("plan", "libelle", "statut", "n_observe", "x", "y",
+                         "cos2_plan", "contribution_plan")])
+```
+
+### Classes
+
+```{r carte}
+c <- lire("10_classes_individus.csv")
+ggplot(c, aes(x=c[[4]], y=c[[5]], colour=factor(classe))) +
+  geom_point(alpha=.25, size=.8) + coord_equal() +
+  labs(title="Classes sur le plan factoriel 1–2", x=paste0("Axe 1 (",fmt(inertie$pourcentage[1])," %)"),
+       y=paste0("Axe 2 (",fmt(inertie$pourcentage[2])," %)"), colour="Classe")
+```
+
+Les profils suivants utilisent les **réponses observées**, parmi les personnes
+ayant répondu à chaque question. Un ratio de 1,5 signifie que la modalité est
+1,5 fois plus fréquente dans la classe que dans l'ensemble analysé.
+Les numéros sont des étiquettes ; ils ne hiérarchisent pas les classes.
+
+```{r profils, fig.height=8}
+p <- subset(profils, effectif_brut >= 30 & part_classe_pct >= 5 & is.finite(ratio) & ratio > 1)
+p <- do.call(rbind, lapply(split(p, p$classe), function(z) head(z[order(-z$ratio),],5)))
+p$libelle <- ifelse(p$variable %in% names(libelles_sociaux),
+                    paste0(libelles_sociaux[p$variable], " : ", p$modalite), p$modalite)
+p$cle <- paste(p$classe, p$libelle, sep="___")
+ggplot(p, aes(ratio, reorder(cle, ratio))) + geom_col(fill="#235e86") +
+  geom_vline(xintercept=1, linetype=2) + facet_wrap(~classe, scales="free_y", ncol=1, labeller=label_both) +
+  scale_y_discrete(labels=function(x) sub("^.*___", "", x)) +
+  labs(title="Cinq modalités distinctives par classe", x="Rapport à la fréquence globale", y=NULL)
+```
+
+```{r tableaux_classes}
+tableau(profils)
+tableau(lire("15_moyennes_classes.csv"))
+```
+
+### Séparation des classes
+
+La **silhouette** compare, pour chaque personne, sa distance moyenne aux membres
+de sa classe à sa distance moyenne à la classe voisine la plus proche.
+Une valeur proche de 1 indique une appartenance bien séparée ; une valeur proche
+de 0 traduit une frontière peu marquée ; une valeur négative indique une plus
+grande proximité moyenne avec une autre classe.
+
+Les découpages ci-dessous proviennent du **même arbre de Ward pondéré**, sur les
+mêmes cinq axes non restandardisés. La silhouette classique et ses moyennes sont
+**non pondérées**. Elles complètent l'analyse sans fournir un nombre de classes
+« vrai » ni une validation sur de nouvelles données.
+
+```{r separation_decoupages}
+separation <- lire("bilan/05_separation_decoupages.csv")
+ggplot(separation, aes(n_classes, silhouette_moyenne)) +
+  geom_line(colour = "#235E86") + geom_point(size = 3, colour = "#235E86") +
+  geom_vline(xintercept = nrow(taille), linetype = 2, colour = "#B34E3F") +
+  scale_x_continuous(breaks = separation$n_classes) +
+  labs(title = "Séparation moyenne selon le nombre de classes",
+       subtitle = "Trait vertical : découpage présenté dans ce rapport",
+       x = "Nombre de classes", y = "Silhouette moyenne (non pondérée)")
+tableau(separation)
+tableau(lire("bilan/06_separation_classes.csv"))
+```
+
+Pour le découpage présenté, la silhouette moyenne est de
+**`r fmt(separation$silhouette_moyenne[separation$n_classes == nrow(taille)], 3)`**,
+et **`r fmt(separation$silhouettes_negatives_pct[separation$n_classes == nrow(taille)])` %**
+des personnes ont une silhouette négative. Le découpage qui maximise ce critère
+parmi ceux examinés comporte **`r separation$n_classes[which.max(separation$silhouette_moyenne)]` classes**.
+Le choix doit aussi tenir compte du contenu et de la taille des classes.
+
+#### Une classe correspond-elle à une seule modalité ?
+
+Le croisement suivant confronte les classes aux réponses **observées** à la
+question sur la connaissance de l'autoconsommation. Les non-réponses restent
+dans le dénominateur. Il permet de repérer une classe qui isole surtout une
+modalité, plutôt qu'un profil combinant plusieurs dimensions.
+
+```{r croisement_autoconso}
+tableau(lire("bilan/07_autoconso_classes.csv"))
+```
+
+Dans le calcul documenté dans la note méthodologique unique, la classe 2 regroupe exactement
+les personnes connaissant uniquement la forme collective. La lecture de l'axe 5
+et les comparaisons entre nombres d'axes permettent d'examiner ce résultat.
+
+### Comparaisons
+
+**Résultat principal : la typologie dépend des choix d'analyse.** L'accord avec
+la référence vaut **`r fmt(ari$ARI[ari$partition_1 == reference & ari$partition_2 == "AFM_3axes_4classes"], 2)`**
+pour trois axes et **`r fmt(ari$ARI[ari$partition_1 == reference & ari$partition_2 == "FAMD_5axes_4classes"], 2)`**
+pour la FAMD. Les classes sont donc à présenter comme une proposition exploratoire.
+
+L'AFM équilibre les thèmes ; la FAMD équilibre les variables sans regrouper les
+questions par thème. L'AFM resserrée change aussi le contenu actif : elle constitue
+une autre question de recherche, pas seulement une autre méthode.
+
+```{r axes}
+r <- lire("sensibilite/04_correlations_entre_axes.csv")
+ggplot(r, aes(factor(axe_initial), factor(axe_variante), fill=correlation_absolue)) +
+  geom_tile(colour="white") + geom_text(aes(label=fmt(correlation,2))) +
+  facet_wrap(~variante) + scale_fill_gradient(low="#eff5f8",high="#4285a6",limits=c(0,1)) +
+  labs(title="Correspondance des axes (corrélations pondérées)",x="Axe initial",y="Axe de la variante",fill="|r|")
+```
+
+L'indice de Rand ajusté (ARI) compare les partitions des mêmes personnes :
+**1 = partitions identiques**, **0 = accord de l'ordre du hasard**. Il est non
+pondéré et indépendant du numéro des classes. Ces comparaisons mesurent la
+**sensibilité aux choix d'analyse**, pas la stabilité par rééchantillonnage.
+
+```{r ari}
+r <- subset(ari, partition_1 == reference & partition_2 != reference)
+noms_variantes <- c(
+  AFM_3axes_3classes="AFM · 3 axes · 3 classes",
+  AFM_3axes_4classes="AFM · 3 axes · 4 classes",
+  AFM_3axes_5classes="AFM · 3 axes · 5 classes",
+  AFM_5axes_3classes="AFM · 5 axes · 3 classes",
+  AFM_5axes_5classes="AFM · 5 axes · 5 classes",
+  AFM_10axes_4classes="AFM · 10 axes · 4 classes",
+  AFM_resserree_5axes_4classes="AFM resserrée · 5 axes · 4 classes",
+  FAMD_5axes_4classes="FAMD · 5 axes · 4 classes",
+  AFM_imputation2_5axes_4classes="Imputation à 2 composantes · 5 axes · 4 classes",
+  AFM_imputation4_5axes_4classes="Imputation à 4 composantes · 5 axes · 4 classes")
+r$libelle <- unname(noms_variantes[r$partition_2])
+ggplot(r, aes(ARI, reorder(libelle, ARI))) + geom_col(fill="#235e86") +
+  geom_text(aes(label=fmt(ARI,2)), hjust=-.15) +
+  scale_x_continuous(limits=c(min(0,min(r$ARI)),1.1)) +
+  labs(title="Accord avec l'AFM à cinq axes et quatre classes",x="ARI", y=NULL)
+```
+
+```{r qualite}
+tableau(lire("sensibilite/06_tailles_et_inertie_classes.csv"))
+```
+
+La part d'inertie interclasses augmente avec le nombre de classes. Elle n'est donc
+pas, seule, un critère de choix du découpage. Les pourcentages d'inertie AFM et
+FAMD ont des dénominateurs différents.
+
+### Population et méthode
+
+#### Variables actives et recodages
+
+```{r dictionnaire_actif}
+tableau(lire("bilan/01_dictionnaire_actif.csv"))
+```
+
+
+```{r population}
+tableau(lire("00_population.csv"))
+tableau(lire("00_marges_population.csv"))
+tableau(lire("01_diagnostic_variables.csv"))
+```
+
+#### Pourquoi la part des jeunes baisse-t-elle ?
+
+```{r synthese_age, results='asis'}
+# Toutes les valeurs de cette synthèse sont calculées depuis le diagnostic R.
+# Le dénominateur du taux de longs est l'effectif du panel nettoyé de même âge.
+if (file.exists(file.path(dossier, "00_calage_etapes.csv"))) {
+  etapes_calage <- lire("00_calage_etapes.csv")
+  ages <- c("18-34", "35-49", "50-64", "65+")
+  extraire_age <- function(etape) {
+    lignes <- etapes_calage[etapes_calage$variable == "AGE_large" &
+                              etapes_calage$etape == etape, ]
+    lignes[match(ages, lignes$modalite), ]
+  }
+  panel_age <- extraire_age("Panel complet")
+  longs_age <- extraire_age("Longs avant filtre AFM")
+  analyse_age <- extraire_age("Longs analysés")
+  taux_longs <- 100 * longs_age$n / panel_age$n
+
+  cat("**Effectifs observés et présence dans le questionnaire long.**\n\n")
+  effectifs_age <- data.frame(
+    Âge = ages, Panel = panel_age$n, Courts = panel_age$n - longs_age$n,
+    Longs = longs_age$n, `Part de longs dans le panel (%)` = fmt(taux_longs),
+    `Longs analysés` = analyse_age$n, check.names = FALSE
+  )
+  print(knitr::kable(effectifs_age, row.names = FALSE))
+
+  cat("\n\n**Parts pondérées à chaque étape (%).**\n\n")
+  parts_age <- data.frame(
+    Âge = ages, `Panel complet` = fmt(panel_age$part_ponderee_pct, 2),
+    `Longs avant filtre AFM` = fmt(longs_age$part_ponderee_pct, 2),
+    `Longs analysés` = fmt(analyse_age$part_ponderee_pct, 2),
+    check.names = FALSE
+  )
+  print(knitr::kable(parts_age, row.names = FALSE))
+
+  cat(paste0("\n\nChez les **18–34 ans**, ", longs_age$n[1], " personnes sur ",
+    panel_age$n[1], " ont un questionnaire long (**", fmt(taux_longs[1]),
+    " %**), contre **", fmt(taux_longs[4]), " %** chez les 65 ans et plus. ",
+    "La part pondérée des jeunes passe de **", fmt(panel_age$part_ponderee_pct[1], 2),
+    " %** dans le panel à **", fmt(longs_age$part_ponderee_pct[1], 2),
+    " %** parmi les longs, puis **", fmt(analyse_age$part_ponderee_pct[1], 2),
+    " %** après le filtre AFM.\n\n"))
+} else {
+  cat("Relancer le rapport avec `recalculer = TRUE` pour générer le diagnostic par âge.\n")
+}
+```
+
+Cette comparaison distingue la **restriction aux questionnaires longs** du
+**filtre sur les réponses trop incomplètes**. Dans les données analysées, la baisse
+de la part des jeunes apparaît essentiellement lors de la première étape.
+Il s'agit d'une différence de composition entre versions du questionnaire,
+pas d'une preuve d'abandon des jeunes pendant la passation.
+
+Les poids actuels ont été construits pour le panel long + court. Leur
+renormalisation sur les seuls longs ne rétablit pas les proportions d'âge du
+panel. Si les longs doivent représenter la même population, un recalage spécifique
+mérite d'être étudié, après documentation de l'affectation long/court.
+
+#### Diagnostics détaillés du calage
+
+```{r diagnostic_calage_etapes}
+# Les tableaux complets restent disponibles pour examiner sexe, territoire
+# et les 16 cellules croisées utilisées par la post-stratification.
+if (file.exists(file.path(dossier, "00_calage_etapes.csv"))) {
+  tableau(lire("00_calage_etapes.csv"))
+  tableau(lire("00_calage_cellules.csv"))
+}
+```
+
+
+- Les poids viennent du panel long + court. Leur normalisation après sélection
+  ne recale pas les questionnaires longs sur la population française ; les marges
+  ci-dessus rendent visible l'écart au panel redressé.
+- L'imputation FAMD régularisée traite `r fmt(indicateurs$cellules_imputees_pct)` %
+  des cellules actives retenues. Les modalités manquantes prennent la catégorie
+  prédite la plus probable. Les prolongements comparent 2, 3 et 4 composantes
+  d'imputation.
+- Les échelles 1–5 sont traitées comme numériques, ce qui suppose des intervalles
+  comparables. Les NSP sont traités comme manquants, sauf dans le score de
+  connaissance où une réponse NSP vaut zéro bonne réponse.
+- Ward est appliqué aux coordonnées non restandardisées, sans consolidation
+  k-means afin de conserver les poids. Quatre classes restent un choix exploratoire.
+- L'ESS de Kish décrit seulement la dispersion des poids. Il ne démontre ni la
+  représentativité du panel ni une précision équivalente pour toutes les estimations.
+
+Rapport produit le `r format(Sys.Date(), "%d/%m/%Y")` à partir des sorties locales.
+L'HTML contient les tableaux agrégés et des figures ; aucun identifiant individuel
+n'y est exporté. Voir aussi `Notes_methodologiques.md` dans ce dossier.
+
+
+```{r versions_rendu, include=FALSE}
+# Traçabilité du rendu, y compris ggplot2, ggrepel, DT, knitr et rmarkdown.
+dossier_trace <- file.path(dossier, "reproductibilite")
+dir.create(dossier_trace, recursive = TRUE, showWarnings = FALSE)
+writeLines(capture.output(sessionInfo()), file.path(dossier_trace, "sessionInfo_rendu.txt"))
+writeLines(as.character(rmarkdown::pandoc_version()), file.path(dossier_trace, "version_pandoc.txt"))
+source_rendu <- normalizePath(knitr::current_input())
+utils::write.csv2(data.frame(fichier = basename(source_rendu),
+  md5 = unname(tools::md5sum(source_rendu))),
+  file.path(dossier_trace, "empreinte_rmarkdown.csv"), row.names = FALSE)
+```
