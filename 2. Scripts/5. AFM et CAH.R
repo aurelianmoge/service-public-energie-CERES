@@ -1,16 +1,16 @@
 # Si le df n'est pas déjà dans l'environnement, on charge le script du redressement qui crée le df
 if (!exists("df") || !"poids_norm" %in% names(df))
-  source("2. Scripts/1. Redressement V4 (final).R")
+  source("2. Scripts/1. Redressement.R")
 
 #### 0. Paramètres et contrôles ####
 
-dossier_sortie <- "3. Outputs/AFM"
+dossier_sortie <- getOption("energie.afm.sortie", "3. Outputs/AFM")
 ncp_imputation <- 3L       # composantes de l'imputation régularisée
 ncp_afm <- 5L              # axes conservés dans l'AFM et utilisés dans la CAH
 max_manquants_variable <- 0.15
 max_manquants_individu <- 0.30
 seuil_effectif_modalite <- 30L  # pour les tableaux et graphiques interprétatifs
-faire_cah <- TRUE          # produire aussi les cartes et profils des classes
+faire_cah <- getOption("energie.afm.cah", TRUE) # FALSE pour les variantes G7
 nombre_classes <- 4L       # choix exploratoire, à discuter sur le dendrogramme
 
 for (pkg in c("FactoMineR", "missMDA", "ggplot2", "ggrepel")) {
@@ -110,14 +110,23 @@ if (length(absentes)) stop("Questions actives absentes : ", paste(absentes, coll
 
 # 2.1. Intérêt pour l'énergie et connaissance des acteurs du système électrique.
 df_afm$interet_energie <- echelle_1_5(df_afm$G3Q00001, "G3Q00001")
-roles <- c("Transporte l’électricité", "Distribue l’électricité",
-           "Produit et fournit", "Produit et fournit")
+# Une même réponse peut être correcte pour plusieurs acteurs (EDF et Engie).
+# Chaque acteur possède une liste de réponses admises : au moins une correspondance
+# vaut UN point, quel que soit le nombre de réponses admises ; aucun appariement
+# exclusif entre acteurs et rôles. Ici les modalités proposées n'exigent pas
+# d'ajouter un deuxième rôle à un acteur dans le système électrique français.
+roles <- list(
+  RTE = "Transporte l’électricité à grande échelle (réseau haute tension)",
+  Enedis = "Distribue l’électricité localement jusqu’aux logements/entreprises",
+  EDF = "Produit et fournit l’électricité",
+  Engie = "Produit et fournit l’électricité"
+)
 items_roles <- paste0("G3Q00002_SQ00", 1:4)  # RTE, Enedis, EDF, Engie
 bons_roles <- lapply(seq_along(roles), function(j) {
   reponse <- as.character(df_afm[[items_roles[j]]])
   # NSP explicite = 0 bonne réponse ; cellule réellement absente = NA.
   ifelse(manquant_technique(reponse), NA_integer_,
-         as.integer(startsWith(trimws(reponse), roles[j])))
+         as.integer(trimws(reponse) %in% roles[[j]]))
 })
 df_afm$score_connaissance <- ifelse(
   Reduce(`|`, lapply(bons_roles, is.na)), NA_real_,

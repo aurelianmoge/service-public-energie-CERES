@@ -9,3 +9,10 @@
 .RDataTmp*
 .Rhistory
 .DS_Store
+
+# Sorties régénérables de l'analyse et du dashboard
+/3. Outputs/
+/4. Rapports/*.html
+/4. Rapports/*_files/
+/4. Rapports/*_cache/
+/Rplots.pdf

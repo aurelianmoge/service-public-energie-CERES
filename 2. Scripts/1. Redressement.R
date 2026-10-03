@@ -18,7 +18,10 @@ library(survey)
 ###############################
 
 # On concatenne le df long et le df long
-df <- dplyr::bind_rows(df_long, df_court)
+# Conserver l'origine avant tout filtrage : même sans identifiant Bilendi,
+# un questionnaire long/court reste identifiable sans ambiguïté.
+df <- dplyr::bind_rows(list(long = df_long, court = df_court),
+                      .id = "version_questionnaire")
 
 # Les variables qui comptent sont :
 # - zone2
@@ -253,4 +256,3 @@ df <- df |>
 # On vérifie la structure de la variable
 summary(df$poids_norm) # chaque individu représente entre 0.61 et 1.47 individu à présent
 sum(df$poids_norm) # on a bien un total de 3 185 individus maintenant
-
