@@ -1,8 +1,8 @@
-# Indicateurs et régressions pondérées (décisions du 09/10, du 11/10 et du 22/10).
+# Indicateurs et régressions pondérées.
 #
 # On construit les indicateurs, on vérifie que ceux à plusieurs items tiennent
 # (leurs items doivent être corrélés), puis on les organise selon leur rôle
-# (découpage du 22/10) : 7 positions expliquées, 6 variables explicatives liées
+# 7 positions expliquées, 6 variables explicatives liées
 # chacune à une hypothèse, et des indicateurs secondaires seulement décrits. Les
 # régressions sont réparties en blocs A à E (voir la partie 4). Modèle principal :
 # MCO ou modèle linéaire de probabilité pondérés (svyglm) ; robustesse : logit ou
@@ -56,8 +56,8 @@ colnames(conn_items) <- c("RTE", "Enedis", "EDF", "Engie")
 df$conn_reseau <- conn_items[, "RTE"] + conn_items[, "Enedis"]
 
 # Intérêt pour l'énergie (G3Q00001) et pour la transition (G4Q00001), de 1 à 5,
-# corrélés à 0,63 mais gardés séparés (11/10). Seul l'intérêt pour l'énergie sert
-# de variable explicative (22/10) : l'intérêt pour la transition se comporte comme
+# corrélés à 0,63 mais gardés séparés. Seul l'intérêt pour l'énergie sert
+# de variable explicative : l'intérêt pour la transition se comporte comme
 # une adhésion (les pro-nucléaires s'intéressent plus à l'énergie mais moins à
 # "la transition") ; il est seulement décrit.
 df$interet_energie    <- echelle(df$G3Q00001)
@@ -122,8 +122,7 @@ df$offre_verte <- ifelse(!df$long | est_nsp(df$G6Q00001), NA,
                          as.numeric(txt(df$G6Q00001) == "Oui"))
 df$scepticisme <- ifelse(df$long, coche(df$G6Q00005_SQ006), NA)
 
-# Préférence pour le nucléaire (axe nucléaire / renouvelables, H1 et H2), ajoutée
-# le 11/10. Le nucléaire apparaît dans deux classements posés à tout le monde :
+# Préférence pour le nucléaire (axe nucléaire / renouvelables). Le nucléaire apparaît dans deux classements posés à tout le monde :
 # la production prioritaire (G4Q00003, 3 rangs) et les leviers de la transition
 # (G4Q00002, 5 rangs). Ses rangs dans les deux questions sont corrélés à 0,68 :
 # le score est la moyenne des deux rangs ramenés de 0 (absent) à 1 (premier).
@@ -137,7 +136,7 @@ df$nuc_levier     <- rang("G4Q00002_", 5, "nucléaire")    # 5 = premier, 0 = ab
 df$pro_nucleaire  <- (df$nuc_production / 3 + df$nuc_levier / 5) / 2
 df$nuc_premier    <- as.numeric(df$nuc_production == 3)   # pour la robustesse
 
-# Conception du service public (H3), ajoutée le 11/10. G3Q00004 : un organisme
+# Conception du service public. G3Q00004 : un organisme
 # public / une mission d'intérêt général / les deux. G3Q00005 (3 choix au plus) :
 # seule "l'absence d'objectif de profit" (SQ002, l'ordre des items ne suit pas
 # leur numéro) distingue nettement les positions de gouvernance.
@@ -161,7 +160,7 @@ alpha_w <- function(M, w) {
   v <- function(x) cov.wt(cbind(x), w)$cov[1, 1]
   ncol(M) / (ncol(M) - 1) * (1 - sum(apply(M, 2, v)) / v(rowSums(M)))
 }
-# Pour deux items binaires : tétrachorique si polycor est installé, sinon phi
+# Pour deux items binaires
 assoc <- function(x, y, w) {
   ok <- !is.na(x) & !is.na(y)
   if (!requireNamespace("polycor", quietly = TRUE)) return(wcor(x, y, w))
@@ -229,11 +228,10 @@ df$zone   <- relevel(factor(as.character(df$zone3)), ref = "Urbain")
 df$taille <- relevel(factor(as.character(df$taille_commune)), ref = "Grande ville")
 df$vague  <- factor(df$vague)
 
-# Difficultés à payer ses factures d'énergie (G2Q00009, posée aux longs), ajoutée
-# le 11/10. Les courts n'ont pas eu la question. Quand le statut est dans le
+# Difficultés à payer ses factures d'énergie (G2Q00009, posée aux longs). Les courts n'ont pas eu la question. Quand le statut est dans le
 # modèle, on les range dans la référence : l'indicatrice "Sans contrat" absorbe
 # leur écart, et les effets des difficultés ne sont estimés que sur les longs.
-# Sans le statut (variante H7), ils forment une catégorie "Non posée".
+# Sans le statut, ils forment une catégorie "Non posée".
 dif <- txt(df$G2Q00009)
 dif <- ifelse(dif %in% c("Rarement", "Parfois"), "Rarement/parfois",
        ifelse(dif %in% c("Souvent", "Toujours"), "Souvent/toujours",
@@ -254,19 +252,18 @@ controles_sans_logement <- c("age", "sexe", "diplome", "revenu", "difficultes_np
 # Les indicateurs ont trois rôles :
 #   - 7 positions expliquées : gestion décentralisée, concurrence, même service
 #     partout, pro-nucléaire, malus, offre verte souscrite, gestes ;
-#   - 6 variables explicatives, chacune liée à une hypothèse : connaissance du
-#     réseau et intérêt pour l'énergie (H4), définition du service public et
-#     absence de profit (H3), disposition à payer et scepticisme (H5) ;
+#   - 6 variables explicatives : connaissance du
+#     réseau et intérêt pour l'énergie, définition du service public et
+#     absence de profit, disposition à payer et scepticisme ;
 #   - des indicateurs secondaires, seulement décrits : bonus, collectivités
 #     garantes, porteur local, autoconsommation collective, intérêt pour la
 #     transition.
 # L'intérêt pour la transition n'est pas une variable explicative : il se comporte
 # comme une adhésion à la transition (voir la variante à la fin de cette partie).
 #
-# Blocs : A1 position = profil ; A2 = + zone (H6, H7) ; B = + connaissance du
-# réseau + intérêt pour l'énergie (H4) ; C = profil + zone + conceptions du service
-# public (H3) ; D = offre souscrite selon la disposition à payer et le scepticisme
-# (H5) ; E (annexe) = qui porte chaque variable explicative.
+# Blocs : A1 position = profil ; A2 = + zone ; B = + connaissance du
+# réseau + intérêt pour l'énergie ; C = profil + zone + conceptions du service
+# public ; D = offre souscrite selon la disposition à payer et le scepticisme ; E = qui porte chaque variable explicative.
 
 # Binaires et part de gestes en points de pourcentage (x 100)
 for (v in c("justice_terr", "anc_collectivites", "anc_porteur_local", "anc_auto_collective",
@@ -287,8 +284,7 @@ positions <- data.frame(
 
 # Plan de sondage sur un sous-échantillon : poids seuls. Le calage n'est pas repris
 # dans le plan, mais c'est sans conséquence : avec le plan post-stratifié, les
-# coefficients sont identiques et les écarts-types plus petits de 0,2 % (vérifié le
-# 11/10 et le 22/10).
+# coefficients sont identiques et les écarts-types plus petits de 0,2 %.
 plan <- function(d) svydesign(ids = ~1, weights = ~poids, data = droplevels(d))
 
 etoiles <- function(p) ifelse(p < .001, "***", ifelse(p < .01, "**", ifelse(p < .05, "*", "")))
@@ -350,7 +346,7 @@ robustesse$accord <- with(robustesse, ifelse(
 robustesse$p_bh <- p.adjust(robustesse$p_principal, "BH")   # Benjamini-Hochberg
 
 
-### Variantes du territoire (H7) : deux versions, avec et sans logement et statut ###
+### Variantes du territoire : deux versions, avec et sans logement et statut ###
 
 # Le logement et le statut absorbent une partie de ce qui fait le territoire
 # (89 % des ruraux vivent en maison) : on présente les deux versions, avec la
@@ -370,7 +366,7 @@ variantes_h7 <- function(i) {
 h7 <- lapply(seq_len(nrow(positions)), variantes_h7)
 
 
-### Bloc C (H3) : les conceptions du service public orientent-elles les positions ? ###
+### Bloc C : les conceptions du service public orientent-elles les positions ? ###
 
 # La définition du service public (organisme public, mission, les deux à la fois)
 # entre par deux indicatrices, avec "les deux à la fois" en référence ; l'absence
@@ -384,7 +380,7 @@ bloc_c <- lapply(setNames(nm = c("concurrence", "local", "justice_terr_pts", "pr
 registres <- sapply(bloc_c, function(m) sapply(conceptions, function(t) coef_txt(m, t)))
 
 
-### Bloc D (H5) : la disposition à payer devient-elle un choix quand l'offre est crédible ? ###
+### Bloc D : la disposition à payer devient-elle un choix quand l'offre est crédible ? ###
 
 # Offre souscrite (en points) selon la disposition à payer, chez les sceptiques
 # et chez les autres. H5 attend une souscription plus faible chez les sceptiques.
@@ -398,7 +394,7 @@ h5_logit <- svyglm(reformulate(c("vert * scepticisme", controles, "zone"), "offr
 # de base faible, un simple décalage de niveau réduit la pente en points.
 
 
-### Bloc E (annexe) : qui porte les variables explicatives ###
+### Bloc E : qui porte les variables explicatives ###
 
 # Chaque variable explicative, et l'intérêt pour la transition, régressés sur le
 # profil et la zone. La définition du service public, à trois modalités, est
