@@ -4,7 +4,7 @@
 # (leurs items doivent être corrélés), puis on les organise selon leur rôle
 # 7 positions expliquées, 6 variables explicatives liées
 # chacune à une hypothèse, et des indicateurs secondaires seulement décrits. Les
-# régressions sont réparties en blocs A à E (voir la partie 4). Modèle principal :
+# régressions sont réparties en blocs A à F (voir la partie 4). Modèle principal :
 # MCO ou modèle linéaire de probabilité pondérés (svyglm) ; robustesse : logit ou
 # logit ordonné.
 #
@@ -263,7 +263,8 @@ controles_sans_logement <- c("age", "sexe", "diplome", "revenu", "difficultes_np
 #
 # Blocs : A1 position = profil ; A2 = + zone ; B = + connaissance du
 # réseau + intérêt pour l'énergie ; C = profil + zone + conceptions du service
-# public ; D = offre souscrite selon la disposition à payer et le scepticisme ; E = qui porte chaque variable explicative.
+# public ; D = offre souscrite selon la disposition à payer et le scepticisme ; E = qui porte chaque variable explicative ;
+# F = B et C réunis.
 
 # Binaires et part de gestes en points de pourcentage (x 100)
 for (v in c("justice_terr", "anc_collectivites", "anc_porteur_local", "anc_auto_collective",
@@ -378,6 +379,20 @@ bloc_c <- lapply(setNames(nm = c("concurrence", "local", "justice_terr_pts", "pr
   svyglm(reformulate(x, y), design = plan(d))
 })
 registres <- sapply(bloc_c, function(m) sapply(conceptions, function(t) coef_txt(m, t)))
+
+
+### Bloc F : les variables de B et de C réunies ###
+
+# Les 7 positions, avec à la fois les conceptions du service public, la
+# connaissance du réseau et l'intérêt pour l'énergie, sur les cas complets. Les
+# coefficients bougent à peine par rapport à B et C estimés séparément.
+bloc_f <- lapply(seq_len(nrow(positions)), function(i) {
+  ind <- positions[i, ]
+  d <- df[if (ind$long_seul) df$long else TRUE, ]
+  x <- c(controles, "zone", conceptions, h4)
+  d <- d[complete.cases(d[c(ind$var, x)]), ]
+  list(ind = ind, n = nrow(d), m = svyglm(reformulate(x, ind$var), design = plan(d)))
+})
 
 
 ### Bloc D : la disposition à payer devient-elle un choix quand l'offre est crédible ? ###
@@ -507,6 +522,12 @@ for (i in seq_along(h7)) {
 cat("\n=== Bloc C (H3) : positions selon les conceptions du service public ===\n")
 print(noquote(registres))
 
+cat("\n=== Bloc F : B et C réunis ===\n")
+out <- t(sapply(bloc_f, function(b) sapply(c(conceptions, h4), function(t) coef_txt(b$m, t, dec_de(b$ind$nom)))))
+dimnames(out) <- list(positions$nom, c("Organisme", "Mission", "Sans profit", "Réseau", "Intérêt énergie"))
+print(noquote(cbind(n = sapply(bloc_f, `[[`, "n"), out,
+                    R2_F = sprintf("%.3f", sapply(bloc_f, function(b) r2(b$m))), R2_B = sprintf("%.3f", r2_tab[, "B"]))))
+
 cat("\n=== Bloc D (H5) : offre souscrite (pts) ~ disposition à payer x scepticisme ===\n")
 print(round(summary(h5)$coefficients[c("vert", "scepticisme", "vert:scepticisme"), ], 3))
 cat("Logit :\n")
@@ -535,9 +556,10 @@ coefs <- rbind(
     une_table(r$m[[e]], e, r$ind$nom, r$n))))),
   do.call(rbind, lapply(names(bloc_c), function(y) une_table(bloc_c[[y]], "C", y, length(bloc_c[[y]]$y)))),
   une_table(h5, "D", "Offre verte souscrite (pts)", length(h5$y)),
-  do.call(rbind, lapply(bloc_e, function(b) une_table(b$m, "E", b$ind$nom, b$n))))
+  do.call(rbind, lapply(bloc_e, function(b) une_table(b$m, "E", b$ind$nom, b$n))),
+  do.call(rbind, lapply(bloc_f, function(b) une_table(b$m, "F", b$ind$nom, b$n))))
 write.csv2(coefs, file.path(dossier_sortie, "coefficients.csv"), row.names = FALSE, fileEncoding = "UTF-8")
-saveRDS(list(res = res, h7 = h7, bloc_c = bloc_c, h5 = h5, h5_logit = h5_logit, bloc_e = bloc_e,
+saveRDS(list(res = res, h7 = h7, bloc_c = bloc_c, h5 = h5, h5_logit = h5_logit, bloc_e = bloc_e, bloc_f = bloc_f,
              conn_rob = conn_rob, robustesse = robustesse, variante_transition = variante_transition,
              coherence = coherence, resume = resume),
         file.path(dossier_sortie, "resultats.rds"))
