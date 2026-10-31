@@ -29,11 +29,11 @@ dossier_sortie <- "3. Outputs/Régressions"
 dir.create(dossier_sortie, recursive = TRUE, showWarnings = FALSE)
 if (!dir.exists(dossier_sortie)) stop("Impossible de créer le dossier de sortie.")
 
-# À COMPLÉTER si tu souhaites choisir une tranche de revenu de référence précise.
+# À COMPLÉTER si on souhaite choisir une tranche de revenu de référence précise.
 # Sinon, la tranche observée la plus fréquente en poids sert de référence.
 reference_revenu <- NULL
 
-# À VÉRIFIER : TRUE suppose que tous les rangs demandés doivent être renseignés.
+# TRUE suppose que tous les rangs demandés doivent être renseignés.
 # Mettre FALSE seulement si un classement partiel est une réponse valide.
 classements_complets <- TRUE
 
@@ -220,8 +220,8 @@ df$sp_organisme_pts <- 100 * as.numeric(df$service_public == "Organisme")
 df$sp_mission_pts <- 100 * as.numeric(df$service_public == "Mission")
 
 
-# Indicateurs complémentaires du script de ton collègue
-#-------------------------------------------------------
+# Indicateurs complémentaires du script d'Antoine
+#------------------------------------------------
 
 ### Acceptabilité : on garde les mesures séparées
 
@@ -304,8 +304,8 @@ rang_nucleaire <- function(prefixe, k, motif) {
   }
   resultat
 }
-# À VÉRIFIER : ces motifs reprennent la logique du collègue ; les libellés
-# correspondants doivent bien désigner une priorité positive du nucléaire.
+# Ces motifs reprennent la logique d'Antoine
+# Les libellés correspondants doivent bien désigner une priorité positive du nucléaire.
 df$nuc_production <- rang_nucleaire("G4Q00003_", 3, "^Nucléaire")
 df$nuc_levier <- rang_nucleaire("G4Q00002_", 5, "nucléaire")
 df$pro_nucleaire <- (df$nuc_production / 3 + df$nuc_levier / 5) / 2
