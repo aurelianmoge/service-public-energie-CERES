@@ -1,5 +1,7 @@
 # Version finale du redressement - avec seulement age*sexe*statut_co (après recodage par Antoine)
 
+rm(list=ls())
+
 # On importe les outputs du script 4 d'Antoine
 source("2. Scripts/4. Variable zone.R")
 
@@ -21,7 +23,7 @@ library(survey)
 # Conserver l'origine avant tout filtrage : même sans identifiant Bilendi,
 # un questionnaire long/court reste identifiable sans ambiguïté.
 df <- dplyr::bind_rows(list(long = df_long, court = df_court),
-                      .id = "version_questionnaire")
+                       .id = "version_questionnaire")
 
 # Les variables qui comptent sont :
 # - zone2
@@ -78,8 +80,8 @@ pop_densite_group <- pop_densite |>
   summarise(pop_strat = sum(NB, na.rm=TRUE))
 
 # On convertit le sexe en facteur dans le df
-df <- df |> mutate(SEXE = factor(G1Q00001,
-                                 levels = c("Homme", "Femme")))
+# MODIFICATION : conserver toutes les réponses déclarées, dont "Autre".
+df <- df |> mutate(SEXE = factor(G1Q00001))
 
 # On transforme le sexe en facteur (comme dans le df)
 pop_densite_group <- pop_densite_group |> 
@@ -99,20 +101,22 @@ pop_densite_group <- pop_densite_group |>
 # Nettoyage préalable
 #--------------------
 
-# On supprime (temporairement) les individus mal décrits sur certaines variables
-# (par ex les "Autre" sur le sexe, les "NSP" sur le statut...)
+# Exclusion sans imputation si l'âge ou la zone est inconnu.
+# "Autre" et les non-réponses sur le sexe sont conservés.
+n_avant_redressement <- nrow(df)
 
 # Sur le sexe
-table(df$SEXE)
-df <- df |> filter(!is.na(SEXE))
+table(df$SEXE, useNA = "ifany")
 
 # Sur le type de commune
 table(df$zone2)
+n_exclus_zone <- sum(is.na(df$zone2))
 df <- df |> filter(!is.na(zone2))
 
 # Sur la catégorie d'âge 
 table(df$AGE_large)
 sum(is.na(df$AGE_large))
+n_exclus_age <- sum(is.na(df$AGE_large)) # après l'exclusion pour zone inconnue
 df <- df |> filter(!is.na(AGE_large))
 
 # On nettoie les niveaux non utilisés
@@ -123,7 +127,9 @@ df <- droplevels(df)
 #-------------------------
 
 # On crée un poids initial uniforme
-df$poids_initial <- 1
+# Même poids pour tous, à l'échelle de la population.
+# Cela stabilise le calage exponentiel, sans changer les poids finaux attendus.
+df$poids_initial <- sum(pop_densite_group$pop_strat) / nrow(df)
 
 
 ### On construit les tableaux avec les distributions marginales
@@ -146,52 +152,82 @@ tab_pop_croisee_age <- pop_densite_group |>
 
 ## Puis avec les distributions jointes
 
-# D'abord, on crée une variable avec le sexe imputé pour tout le monde (pour le redressement uniquement !)
-# (autrement dit, on garde les 'Autres', mais on les impute aléatoirement juste pour le redressement)
+# On cale tout le monde sur âge x zone, sans imputer le sexe.
+# Parmi les réponses Homme/Femme, on cale leur proportion conditionnelle
+# sur celle de l'INSEE, dans chaque cellule âge x zone.
 
-# Sexe déclaré : on le conserve tel quel pour les analyses
-df <- df |>
-  mutate(SEXE = factor(G1Q00001))
+pop_calage <- pop_densite_group |> filter(pop_strat > 0)
+stopifnot(
+  nrow(df) > 0,
+  !anyNA(pop_calage[c("AGE_large", "SEXE", "zone2", "pop_strat")]),
+  all(is.finite(pop_calage$pop_strat)),
+  all(pop_calage$SEXE %in% c("Homme", "Femme"))
+)
 
-# Sexe utilisé uniquement pour le redressement
-set.seed(1234)
+pop_joint <- pop_calage |>
+  group_by(AGE_large, zone2) |>
+  summarise(
+    Freq = sum(pop_strat),
+    Freq_homme = sum(pop_strat[SEXE == "Homme"]),
+    .groups = "drop"
+  ) |>
+  mutate(
+    strate = paste(AGE_large, zone2, sep = " | "),
+    p_homme = Freq_homme / Freq
+  )
+stopifnot(all(pop_joint$p_homme > 0 & pop_joint$p_homme < 1))
 
 df <- df |>
   mutate(
-    SEXE_redress = case_when(
-      G1Q00001 == "Homme" ~ "Homme",
-      G1Q00001 == "Femme" ~ "Femme",
-      
-      # Imputation 50/50 pour les autres modalités
-      G1Q00001 %in% c(
-        "Autre",
-        "Ne sait pas / Ne se prononce pas"
-      ) ~ sample(
-        c("Homme", "Femme"),
-        size = n(),
-        replace = TRUE
-      ),
-      
-      TRUE ~ NA_character_
-    ),
+    strate = factor(paste(AGE_large, zone2, sep = " | "),
+                    levels = pop_joint$strate),
     SEXE_redress = factor(
-      SEXE_redress,
+      case_when(
+        G1Q00001 == "Homme" ~ "Homme",
+        G1Q00001 == "Femme" ~ "Femme",
+        TRUE ~ NA_character_
+      ),
       levels = c("Homme", "Femme")
     )
   )
+stopifnot(!anyNA(df$strate))
+if (any(table(df$strate) == 0)) {
+  stop("Cellule âge x zone sans répondant : regrouper les catégories concernées ",
+       "dans df ET dans les données INSEE avant de relancer.")
+}
 
-df <- df |>
-  mutate(
-    strate = interaction(AGE_large, SEXE_redress, zone2, drop = TRUE)
+tab_sexe <- table(df$strate, df$SEXE_redress)
+pop_joint$calage_sexe_possible <- tab_sexe[, "Homme"] > 0 &
+  tab_sexe[, "Femme"] > 0
+if (any(!pop_joint$calage_sexe_possible)) {
+  warning("Sexe non calé dans ces cellules, faute de H et F observés : ",
+          paste(pop_joint$strate[!pop_joint$calage_sexe_possible], collapse = ", "),
+          ". L'âge x zone y reste calé pour tout le monde.")
+}
+
+# Pour Autre/NSP, toutes les variables de calage du sexe valent zéro :
+# leur poids ne dépend donc que de leur cellule âge x zone.
+# Pour H/F, la somme pondérée de (1[Homme] - proportion cible) doit valoir 0.
+noms_calage_sexe <- character()
+for (j in which(pop_joint$calage_sexe_possible)) {
+  nom <- paste0("sexe_centre_", j)
+  df[[nom]] <- ifelse(
+    df$strate == pop_joint$strate[j] & !is.na(df$SEXE_redress),
+    as.numeric(df$SEXE_redress == "Homme") - pop_joint$p_homme[j],
+    0
   )
+  noms_calage_sexe <- c(noms_calage_sexe, nom)
+}
 
-pop_joint <- pop_densite_group |>
-  mutate(strate = interaction(
-    AGE_large, SEXE, zone2,
-    drop = TRUE
-  )) |>
-  group_by(strate) |>
-  summarise(Freq = sum(pop_strat), .groups = "drop")
+formule_calage <- reformulate(c("strate", noms_calage_sexe), intercept = FALSE)
+X_calage <- model.matrix(formule_calage, data = df)
+X_age_zone <- model.matrix(~ strate - 1, data = df)
+stopifnot(identical(colnames(X_calage)[seq_len(ncol(X_age_zone))],
+                    colnames(X_age_zone)))
+population_calage <- setNames(
+  c(pop_joint$Freq, rep(0, length(noms_calage_sexe))),
+  colnames(X_calage)
+)
 
 # On crée un objet de type "survey"
 df_design <- svydesign(
@@ -200,12 +236,27 @@ df_design <- svydesign(
   data = df
 )
 
-# On utilise la fonction rake() de survey pour créer les poids
-design_post <- postStratify(
+# Calage exponentiel positif avec les contraintes ci-dessus.
+# On garde le nom design_post pour faciliter la suite des analyses.
+design_post <- calibrate(
   df_design,
-  strata = ~strate,
-  population = pop_joint
+  formula = formule_calage,
+  population = population_calage,
+  calfun = "raking",
+  maxit = 100,
+  epsilon = 1e-7
 )
+
+# Vérifier le respect de TOUTES les contraintes, sans forcer une non-convergence.
+ecart_calage <- as.numeric(crossprod(X_calage, weights(design_post))) -
+  population_calage
+stopifnot(
+  all(is.finite(weights(design_post)) & weights(design_post) > 0),
+  all(abs(ecart_calage) <= 1e-6 * pmax(1, abs(population_calage)))
+)
+print(data.frame(cible = names(population_calage),
+                 total_cible = as.numeric(population_calage),
+                 ecart = as.numeric(ecart_calage)))
 
 
 # Vérifications et description des poids
@@ -246,7 +297,7 @@ c(
 df$poids <- weights(design_post)
 
 # On vérifie la structure de la variable
-summary(df$poids) # entre 10 315 et 24 651
+summary(df$poids) # entre 10 264 et 24 530
 sum(df$poids) # on a un total de 53 483 601 d'individus (soit la population française des 18+)
 
 # On crée un poids normalisé
@@ -254,5 +305,19 @@ df <- df |>
   mutate(poids_norm = poids * nrow(df) / sum(poids))
 
 # On vérifie la structure de la variable
-summary(df$poids_norm) # chaque individu représente entre 0.61 et 1.47 individu à présent
-sum(df$poids_norm) # on a bien un total de 3 185 individus maintenant
+summary(df$poids_norm) # chaque individu représente entre 0.61 et 1.46 individu à présent
+sum(df$poids_norm) # on a bien un total de 3 192 individus maintenant
+
+design_post$variables <- df
+attr(df, "plan_redresse") <- design_post
+attr(df, "diagnostic_redressement") <- list(
+  n_avant = n_avant_redressement,
+  exclus_zone = n_exclus_zone,
+  exclus_age_apres_zone = n_exclus_age,
+  n_apres = nrow(df),
+  cellules = pop_joint,
+  contraintes = data.frame(cible = names(population_calage),
+                           total_cible = as.numeric(population_calage),
+                           ecart = as.numeric(ecart_calage))
+)
+rm(list = setdiff(ls(all.names = TRUE), "df"))
