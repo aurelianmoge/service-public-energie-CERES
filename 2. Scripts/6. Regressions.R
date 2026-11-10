@@ -1,1150 +1,496 @@
-#################################
-### Chargement des packages   ###
-#################################
+# Régressions : qu'est-ce qui explique les positions sur le service public de
+# l'électricité et la transition ?
+#
+# Ce script remplace l'ancien script 6, qui estimait près de 260 modèles. On
+# s'en tient ici à une seule démarche, la même pour chaque position :
+#
+#   1. Quatre modèles emboîtés, estimés sur les mêmes répondants :
+#        M1 : profil social (âge, sexe, diplôme, revenu) ;
+#        M2 : + conditions de vie (zone, logement, statut, difficultés à payer) ;
+#        M3 : + rapport à l'énergie (connaissance des acteurs, intérêt) ;
+#        M4 : + conception du service public (définition, absence de profit).
+#      La vague d'enquête est contrôlée dans tous les modèles.
+#   2. Une décomposition du R² de M4 entre les sept blocs de variables (âge,
+#      sexe, diplôme, revenu, conditions de vie, rapport à l'énergie,
+#      conception du service public), par la méthode de Shapley.
+#   3. Des robustesses (logit, logit ordonné, nombre de gestes sur 9, sans
+#      poids) et un focus sur le nucléaire.
+#
+# Les variables et leurs conventions sont celles du script 7 (Antoine) : mêmes
+# positions (pro-nucléaire de 0 à 100 comme mesure principale du nucléaire,
+# part des gestes parmi ceux qui concernent le répondant), mêmes contrôles
+# (zone à trois modalités, logement, statut, difficultés), même rapport à
+# l'énergie (connaissance du réseau et intérêt pour l'énergie), mêmes
+# robustesses. Ce script y ajoute les modèles emboîtés, la décomposition du R²
+# et les deux axes factoriels.
+#
+# Une précaution sur les R² : ils ne sont pas comparables tels quels d'une
+# position à l'autre. Une variable binaire (oui / non) a mécaniquement un R² plus
+# faible qu'un score continu, à force explicative égale. On compare donc surtout
+# la répartition du R² entre les blocs (les parts de Shapley), qui ne dépend pas
+# de cette différence de mesure.
+#
+# L'ordre des blocs suppose une chaîne (le profil social précède les
+# représentations) : ce sont des associations, pas des effets causaux. Ajouter la
+# conception du service public peut absorber une partie de l'effet du profil.
+#
+# Il faut avoir lancé le script 3 (recodages) et les scripts 5a et 5b (pour les
+# deux axes factoriels utilisés comme positions synthétiques).
+
+
+###############################
+### Chargement des packages ###
+###############################
 
 library(tidyverse)
 library(survey)
 
 
-#################################
-#### Importation des données ####
-#################################
+###############################
+### Importation des données ###
+###############################
 
-# Ce script supprime ses objets intermédiaires et ne conserve que df (pondéré !)
-source("2. Scripts/1. Redressement.R", encoding = "UTF-8")
+df <- readRDS("3. Outputs/df_recode.rds")
 
-plan_complet <- attr(df, "plan_redresse")
-diagnostic_redressement <- attr(df, "diagnostic_redressement")
-if (is.null(plan_complet)) stop("Le plan de redressement manque dans df.")
-stopifnot(nrow(df) == nrow(plan_complet$variables),
-          isTRUE(all.equal(as.numeric(weights(plan_complet)), as.numeric(df$poids))))
-attr(df, "plan_redresse") <- NULL
-attr(df, "diagnostic_redressement") <- NULL
+# Les deux axes principaux des analyses factorielles : le pôle "marché" du
+# service public (script 5a) et l'axe nucléaire (script 5b). On inverse l'axe de
+# la transition pour qu'une valeur élevée signifie "plus nucléaire".
+axe_sp <- readRDS("3. Outputs/Analyses factorielles/1. Service public/coordonnees.rds")
+axe_tr <- readRDS("3. Outputs/Analyses factorielles/2. Transition/coordonnees.rds")
+df <- df |>
+  mutate(axe_marche    = axe_sp$sp_axe1,
+         axe_nucleaire = -axe_tr$tr_axe1)
 
-# On conserve les longs ET les courts ; chaque modèle choisit ensuite son domaine.
-df$long <- df$version_questionnaire == "long"
-stopifnot(!anyNA(df$long))
-
-dossier_sortie <- "3. Outputs/Régressions"
-dir.create(dossier_sortie, recursive = TRUE, showWarnings = FALSE)
-if (!dir.exists(dossier_sortie)) stop("Impossible de créer le dossier de sortie.")
-
-# À COMPLÉTER si on souhaite choisir une tranche de revenu de référence précise.
-# Sinon, la tranche observée la plus fréquente en poids sert de référence.
-reference_revenu <- NULL
-
-# TRUE suppose que tous les rangs demandés doivent être renseignés.
-# Mettre FALSE seulement si un classement partiel est une réponse valide.
-classements_complets <- TRUE
-
-# À COMPLÉTER si le questionnaire confirme le nom de cette colonne, par exemple
-# "G4Q00004_SQ007". Ne pas deviner son numéro : NULL laisse les N/A en NA.
-colonne_nsp_acceptabilite <- NULL
+dossier <- "3. Outputs/Régressions"
+dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
 
 
-#################################
-### Fonctions de recodage      ###
-#################################
+############################################
+### Préparation des variables du modèle  ###
+############################################
 
-texte <- function(x) {
-  z <- as.character(x)
-  z <- gsub("[\u00a0\u202f]", " ", z)
-  z <- gsub("\u2019", "'", z, fixed = TRUE)
-  trimws(gsub("[[:space:]]+", " ", z))
-}
+# Les positions binaires et la part de gestes sont exprimées en points (x 100) :
+# un coefficient de 5 se lit "+ 5 points de pourcentage".
+df <- df |>
+  mutate(solidarite_pts        = 100 * solidarite,
+         nucleaire_premier_pts = 100 * nucleaire_premier,
+         pro_nucleaire_pts     = 100 * pro_nucleaire,
+         malus_pts             = 100 * mesure_malus,
+         offre_verte_pts       = 100 * offre_verte,
+         gestes_part_pts       = 100 * gestes_part)
 
-manquant_technique <- function(x) {
-  z <- texte(x)
-  is.na(z) | z %in% c("", "N/A", "NA", "Sans réponse", "Non renseigné")
-}
+# Les "Ne sait pas" de la définition du service public sortent du modèle
+df <- df |>
+  mutate(definition_sp = droplevels(na_if(sp_definition, "NSP")))
 
-nsp <- function(x) {
-  z <- tolower(texte(x))
-  !is.na(z) & z %in% c("ne sait pas / ne se prononce pas", "ne sait pas",
-                       "ne se prononce pas", "nsp")
-}
+# Les difficultés à payer n'ont été posées qu'aux longs : le script 3 range les
+# courts dans "Jamais", et la modalité "Sans contrat" du statut absorbe leur
+# écart (comme dans le script 7).
 
-refus <- function(x) {
-  z <- tolower(texte(x))
-  !is.na(z) & z %in% c("refus de répondre", "refuse de répondre",
-                       "préfère ne pas répondre")
-}
+### Les sept blocs de variables explicatives
 
-manquant <- function(x) manquant_technique(x) | nsp(x) | refus(x)
-
-echelle_1_5 <- function(x, variable) {
-  z <- texte(x)
-  z[manquant(x)] <- NA_character_
-  mauvais <- !is.na(z) & !grepl("^[1-5]($|[[:space:]])", z)
-  if (any(mauvais)) {
-    stop(variable, " : compléter le recodage de ",
-         paste(unique(z[mauvais]), collapse = " / "))
-  }
-  as.numeric(substr(z, 1, 1))
-}
-
-recode_choix <- function(x, motifs, valeurs, variable) {
-  z <- texte(x)
-  resultat <- rep(NA_character_, length(z))
-  nombre <- rep(0L, length(z))
-  for (j in seq_along(motifs)) {
-    i <- !manquant(x) & grepl(motifs[j], z)
-    resultat[i] <- valeurs[j]
-    nombre[i] <- nombre[i] + 1L
-  }
-  mauvais <- !manquant(x) & nombre != 1L
-  if (any(mauvais)) {
-    stop(variable, " : compléter le recodage de ",
-         paste(unique(z[mauvais]), collapse = " / "))
-  }
-  resultat
-}
-
-coche <- function(x, variable) {
-  z <- texte(x)
-  mauvais <- !manquant(x) & !z %in% c("Oui", "Non")
-  if (any(mauvais)) stop(variable, " : libellés Oui/Non à vérifier.")
-  ifelse(manquant(x), NA_real_, as.numeric(z == "Oui"))
-}
-
-facteur_controle <- function(x, reference = NULL) {
-  z <- texte(x)
-  z[manquant(x)] <- "NSP/manquant"
-  f <- factor(z)
-  valides <- setdiff(levels(f), "NSP/manquant")
-  if (is.null(reference)) {
-    if (length(valides)) {
-      masses <- tapply(df$poids, z, sum)
-      reference <- valides[which.max(masses[valides])]
-    } else reference <- levels(f)[1]
-  }
-  if (!reference %in% levels(f)) stop("Référence absente : ", reference)
-  relevel(f, ref = reference)
-}
-
-ecrire_csv <- function(x, nom) {
-  write.csv2(x, file.path(dossier_sortie, nom), row.names = FALSE,
-             na = "", fileEncoding = "UTF-8")
-}
-
-# Export des libellés AVANT les recodages : permet de corriger un arrêt du script.
-variables_auditees <- names(df)[grepl("^G[1-7]Q|^zone|^taille_commune", names(df))]
-variables_auditees <- setdiff(variables_auditees,
-                              variables_auditees[grepl("_other$", variables_auditees)])
-audit_libelles <- bind_rows(lapply(variables_auditees, function(v) {
-  z <- texte(df[[v]])
-  z[is.na(z)] <- "<NA réel>"
-  tab <- table(z)
-  data.frame(variable = v, libelle = names(tab), n = as.integer(tab))
-}))
-ecrire_csv(audit_libelles, "audit_libelles.csv")
-
-
-###########################
-### Création des scores ###
-###########################
-
-# Intérêt pour l'énergie et connaissance des acteurs du système électrique
-#-------------------------------------------------------------------------
-
-### Score d'intérêt
-
-df$interet_energie <- echelle_1_5(df$G3Q00001, "G3Q00001")
-df$interet_transition <- echelle_1_5(df$G4Q00001, "G4Q00001")
-
-
-### Scores de connaissance
-
-# On distingue deux domaines et on conserve aussi le total.
-# NSP explicite = 0 ; absence technique ou refus = NA.
-# À VÉRIFIER : les réponses justes ci-dessous sont reprises de ton script.
-roles <- list(
-  RTE = "Transporte l’électricité à grande échelle (réseau haute tension)",
-  Enedis = "Distribue l’électricité localement jusqu’aux logements/entreprises",
-  EDF = "Produit et fournit l’électricité",
-  Engie = "Produit et fournit l’électricité"
+blocs <- list(
+  "Âge"                  = "age_tranche",
+  "Sexe"                 = "sexe",
+  "Diplôme"              = "diplome",
+  "Revenu"               = "revenu",
+  "Conditions de vie"    = c("zone3", "logement", "statut", "difficultes"),
+  "Rapport à l'énergie"  = c("conn_reseau", "interet_energie"),
+  "Conception du SP"     = c("definition_sp", "sp_sans_profit")
 )
-items_roles <- paste0("G3Q00002_SQ00", 1:4)
-bons_roles <- sapply(seq_along(roles), function(j) {
-  reponse <- df[[items_roles[j]]]
-  ifelse(manquant_technique(reponse) | refus(reponse), NA_real_,
-         as.numeric(texte(reponse) %in% texte(roles[[j]])))
-})
-colnames(bons_roles) <- names(roles)
 
-df$conn_reseau <- rowSums(bons_roles[, c("RTE", "Enedis"), drop = FALSE])
-df$conn_fournisseurs <- rowSums(bons_roles[, c("EDF", "Engie"), drop = FALSE])
-df$score_connaissance <- rowSums(bons_roles)
-df$connaissance_moyenne <- df$score_connaissance / 4
-
-# On conserve les items pour les modèles complémentaires.
-for (a in names(roles)) df[[paste0("juste_", a)]] <- bons_roles[, a]
-
-# Deux scores séparés OU le total ; jamais les trois simultanément :
-# score_connaissance = conn_reseau + conn_fournisseurs (colinéarité exacte).
-
-### Non-savoir déclaré et erreurs parmi ceux qui tentent de répondre
-
-tentatives <- sapply(1:2, function(j) {
-  x <- df[[items_roles[j]]]
-  ifelse(manquant_technique(x) | refus(x), NA_real_, as.numeric(!nsp(x)))
-})
-df$conn_nb_nsp <- 2 - rowSums(tentatives)
-df$conn_juste_si_repond <- ifelse(rowSums(tentatives) > 0,
-                                  100 * df$conn_reseau / rowSums(tentatives), NA_real_)
-# Ce dernier score porte sur une sous-population sélectionnée, pas sur tous.
-
-
-### Conceptions du service public et positions de gouvernance
-
-df$service_public <- factor(recode_choix(
-  df$G3Q00004,
-  c("^Un organisme public", "^Une mission", "^Les deux"),
-  c("Organisme", "Mission", "Les deux"), "G3Q00004"),
-  levels = c("Les deux", "Organisme", "Mission"))
-
-df$solidarite_territoriale <- recode_choix(
-  df$G3Q00006, c("^Adapter le coût", "^Maintenir la même qualité"),
-  c("Adaptation", "Égalité/solidarité"), "G3Q00006")
-df$solidarite_01 <- ifelse(is.na(df$solidarite_territoriale), NA_real_,
-                           as.numeric(df$solidarite_territoriale == "Égalité/solidarité"))
-df$solidarite_pts <- 100 * df$solidarite_01
-
-# 1 = national ; 5 = local (l'ancien nom était centralisation).
-df$local <- echelle_1_5(df$G3Q00008, "G3Q00008")
-# 1 = monopole public ; 5 = concurrence.
-df$concurrence <- echelle_1_5(df$G3Q00009, "G3Q00009")
-df$sp_sans_profit <- coche(df$G3Q00005_SQ002, "G3Q00005_SQ002")
-df$sp_sans_profit_pts <- 100 * df$sp_sans_profit
-df$sp_organisme_pts <- 100 * as.numeric(df$service_public == "Organisme")
-df$sp_mission_pts <- 100 * as.numeric(df$service_public == "Mission")
-
-
-# Indicateurs complémentaires du script d'Antoine
-#------------------------------------------------
-
-### Acceptabilité : on garde les mesures séparées
-
-acc_items <- sapply(1:5, function(j) {
-  v <- paste0("G4Q00004_SQ00", j)
-  coche(df[[v]], v)
-})
-colnames(acc_items) <- c("bonus", "malus", "invest_public", "regulation", "information")
-aucune <- texte(df$G4Q00004_SQ006) %in% "Oui"
-contradiction <- aucune & rowSums(acc_items == 1, na.rm = TRUE) > 0
-acc_items[aucune, ] <- 0
-acc_items[contradiction, ] <- NA_real_
-if (any(contradiction)) warning("Acceptabilité : Aucune + mesure cochée, mises à NA.")
-if (!is.null(colonne_nsp_acceptabilite)) {
-  stopifnot(colonne_nsp_acceptabilite %in% names(df))
-  acc_items[texte(df[[colonne_nsp_acceptabilite]]) %in% "Oui", ] <- NA_real_
-}
-for (v in colnames(acc_items)) {
-  df[[paste0("acc_", v)]] <- acc_items[, v]
-  df[[paste0("acc_", v, "_pts")]] <- 100 * acc_items[, v]
-}
-
-
-### Gestes réalisés : part parmi les concernés et nombre absolu
-
-gestes <- sapply(1:9, function(j) texte(df[[paste0("G7Q00001_SQ00", j)]]))
-fait <- concerne <- matrix(NA_real_, nrow(df), 9)
-for (j in 1:9) {
-  x <- gestes[, j]
-  deja <- x %in% "Déjà fait"
-  jamais <- !is.na(x) & grepl("^Jamais", x)
-  non_concerne <- x %in% c("Non concerné·e", "Non concerné", "Non concernée")
-  inconnu <- df$long & !(deja | jamais | non_concerne | manquant(x))
-  if (any(inconnu)) stop("Compléter le recodage de G7Q00001_SQ00", j,
-                         " : ", paste(unique(x[inconnu]), collapse = " / "))
-  fait[deja, j] <- 1
-  fait[jamais | non_concerne, j] <- 0
-  concerne[deja | jamais, j] <- 1
-  concerne[non_concerne, j] <- 0
-}
-fait[!df$long, ] <- NA_real_
-concerne[!df$long, ] <- NA_real_
-df$gestes_n <- rowSums(fait)
-df$gestes_concernes <- rowSums(concerne)
-df$gestes_part <- ifelse(df$gestes_concernes > 0,
-                         df$gestes_n / df$gestes_concernes, NA_real_)
-df$gestes_part_pts <- 100 * df$gestes_part
-# Pas de na.rm = TRUE : une réponse inconnue ne devient ni zéro ni "non concerné".
-
-
-### Offre verte : disposition à payer, souscription et scepticisme
-
-x <- df$G6Q00004
-x[!df$long] <- NA
-df$vert <- echelle_1_5(x, "G6Q00004")
-df$vert_c <- df$vert - 3 # centré sur le milieu de l'échelle
-x <- df$G6Q00001
-x[!df$long] <- NA
-df$offre_verte <- coche(x, "G6Q00001")
-df$offre_verte_pts <- 100 * df$offre_verte
-x <- df$G6Q00005_SQ006
-x[!df$long] <- NA
-df$scepticisme <- coche(x, "G6Q00005_SQ006")
-df$scepticisme_pts <- 100 * df$scepticisme
-
-
-### Priorité relative du nucléaire dans deux classements
-
-rang_nucleaire <- function(prefixe, k, motif) {
-  choix <- sapply(1:k, function(j) texte(df[[paste0(prefixe, j)]]))
-  absents <- matrix(manquant(as.vector(choix)), nrow(df), k)
-  nucleaire <- matrix(grepl(motif, as.vector(choix), ignore.case = TRUE), nrow(df), k)
-  doublons <- apply(choix, 1, function(z) anyDuplicated(z[!manquant(z)]) > 0)
-  valide <- !absents[, 1] & !doublons & rowSums(nucleaire) <= 1
-  if (classements_complets) valide <- valide & rowSums(absents) == 0
-  resultat <- rep(NA_real_, nrow(df))
-  for (i in which(valide)) {
-    rang <- which(nucleaire[i, ])
-    resultat[i] <- if (length(rang)) k + 1 - rang[1] else 0
-  }
-  resultat
-}
-# Ces motifs reprennent la logique d'Antoine
-# Les libellés correspondants doivent bien désigner une priorité positive du nucléaire.
-df$nuc_production <- rang_nucleaire("G4Q00003_", 3, "^Nucléaire")
-df$nuc_levier <- rang_nucleaire("G4Q00002_", 5, "nucléaire")
-df$pro_nucleaire <- (df$nuc_production / 3 + df$nuc_levier / 5) / 2
-df$pro_nucleaire_pts <- 100 * df$pro_nucleaire
-df$nuc_premier_pts <- 100 * as.numeric(df$nuc_production == 3)
-
-
-### Ancrage local : indicateurs séparés, sans score forcé
-
-df$anc_collectivites <- coche(df$G3Q00007_SQ004, "G3Q00007_SQ004")
-x <- df$G4Q00006_SQ003
-x[!df$long] <- NA
-df$anc_porteur_local <- coche(x, "G4Q00006_SQ003")
-df$anc_auto_collective <- ifelse(
-  !df$long | manquant(df$G4Q00007), NA_real_,
-  as.numeric(texte(df$G4Q00007) == "Autoconsommation collective"))
-for (v in c("anc_collectivites", "anc_porteur_local", "anc_auto_collective")) {
-  df[[paste0(v, "_pts")]] <- 100 * df[[v]]
-}
-
-
-### Indice solidarité / monopole : complément exploratoire
-
-df$monopole_01 <- (5 - df$concurrence) / 4
-df$indice_solidarite_monopole <- 100 * (df$solidarite_01 + df$monopole_01) / 2
-# Les composantes restent analysées séparément dans les modèles principaux.
-
-
-#######################################
-### Variables de contrôle et plan   ###
-#######################################
-
-# Diplôme et revenu restent des catégories, comme dans ton script.
-# Les NSP sont identifiés dans l'analyse principale ; on les exclut ensuite
-# dans une sensibilité. Une catégorie NSP ne remplace pas une imputation.
-df$diplome <- facteur_controle(df$G1Q00003, "Bac")
-df$revenu <- facteur_controle(df$G1Q00005, reference_revenu)
-df$AGE_large <- relevel(factor(df$AGE_large), ref = "35-49")
-
-# "Autre" est une réponse observée, distincte de NSP et des absences.
-df$SEXE <- facteur_controle(df$G1Q00001, "Homme")
-df$questionnaire <- factor(ifelse(df$long, "Long", "Court"),
-                           levels = c("Long", "Court"))
-df$vague <- factor(df$vague)
-df$zone2 <- relevel(factor(df$zone2), ref = "Urbain")
-variable_zone <- if ("zone3" %in% names(df)) "zone3" else "zone2"
-df$zone <- facteur_controle(df[[variable_zone]], "Urbain")
-if ("taille_commune" %in% names(df)) {
-  reference_taille <- if ("Grande ville" %in% texte(df$taille_commune)) "Grande ville" else NULL
-  df$taille <- facteur_controle(df$taille_commune, reference_taille)
-}
-df$logement <- facteur_controle(df$G2Q00003)
-
-statut <- texte(df$G2Q00004)
-if ("G2Q00004_other" %in% names(df)) {
-  precision <- tolower(texte(df$G2Q00004_other))
-  corriger <- statut %in% "Autre" & grepl("usufrui|indivision|crédit", precision)
-  statut[corriger] <- "Propriétaire"
-}
-statut[df$long & manquant(statut)] <- "NSP/manquant"
-statut[!df$long] <- "Non posé (court)"
-df$statut <- factor(statut)
-if ("Propriétaire" %in% levels(df$statut)) {
-  df$statut <- relevel(df$statut, ref = "Propriétaire")
-}
-
-x <- df$G2Q00009
-x[!df$long] <- NA
-difficultes <- recode_choix(
-  x, c("^Jamais$", "^Rarement$", "^Parfois$", "^Souvent$", "^Toujours$"),
-  c("Jamais", "Rarement/parfois", "Rarement/parfois", "Souvent/toujours",
-    "Souvent/toujours"), "G2Q00009")
-difficultes[df$long & is.na(difficultes)] <- "NSP/manquant"
-difficultes[!df$long] <- "Non posé (court)"
-df$difficultes <- factor(difficultes)
-
-# Codage conditionnel : seuls les longs renseignent les difficultés.
-# Zéro chez les courts signifie "pas de contribution à cette indicatrice".
-# Le niveau Non posé du statut (ou questionnaire) représente leur intercept.
-df$diff_parfois <- as.numeric(df$long & difficultes == "Rarement/parfois")
-df$diff_souvent <- as.numeric(df$long & difficultes == "Souvent/toujours")
-df$diff_nsp <- as.numeric(df$long & difficultes == "NSP/manquant")
-
-df$controles_observes <- !(
-  manquant(df$G1Q00001) | manquant(df$G1Q00003) | manquant(df$G1Q00005) |
-    manquant(df$G2Q00003) | manquant(df[[variable_zone]]) | is.na(df$vague) |
-    (df$long & (manquant(df$G2Q00004) | manquant(df$G2Q00009)))
+# Les modèles emboîtés : chaque modèle ajoute des blocs au précédent
+modeles_emboites <- list(
+  M1 = c("Âge", "Sexe", "Diplôme", "Revenu"),
+  M2 = c("Âge", "Sexe", "Diplôme", "Revenu", "Conditions de vie"),
+  M3 = c("Âge", "Sexe", "Diplôme", "Revenu", "Conditions de vie", "Rapport à l'énergie"),
+  M4 = names(blocs)
 )
-# Les réponses "Autre" au sexe satisfont controles_observes si le reste est connu.
 
-controles_profil <- c("AGE_large", "SEXE", "diplome", "revenu", "vague", "questionnaire")
-controles_complets <- c("AGE_large", "SEXE", "diplome", "revenu", "vague",
-                        "logement", "statut", "diff_parfois", "diff_souvent", "diff_nsp")
-controles_sans_logement <- c(controles_profil, "diff_parfois", "diff_souvent", "diff_nsp")
-# Statut et questionnaire ne sont pas inclus ensemble : leur indicatrice
-# Court/Non posé serait redondante.
+### Les positions à expliquer
 
-# Aucun filtre ni tri de df n'a été effectué depuis le redressement.
-stopifnot(nrow(df) == nrow(plan_complet$variables),
-          identical(as.character(df$strate), as.character(plan_complet$variables$strate)))
-plan_complet$variables <- df
-plan_non_pondere <- svydesign(ids = ~1, data = df)
-# Sensibilité à la convention de calage du sexe : âge x zone seulement,
-# pour tout le monde, avec les mêmes effectifs cibles et sans exclure Autre.
-plan_age_zone <- postStratify(
-  svydesign(ids = ~1, weights = ~poids_initial, data = df),
-  strata = ~strate,
-  population = diagnostic_redressement$cellules[, c("strate", "Freq")]
+# Les sept positions du script 7, avec leur robustesse (sur la variable "brute") :
+# logit ordonné pour les échelles, logit pour les binaires et pour le
+# pro-nucléaire (nucléaire en première production), nombre de gestes faits sur 9
+# pour les gestes. On y ajoute les deux axes factoriels.
+positions <- tribble(
+  ~variable,           ~nom,                                       ~longs_seuls, ~robuste,   ~brute,
+  "local",             "Gestion décentralisée (1-5)",              FALSE,        "ologit",   "local",
+  "concurrence",       "Concurrence (1-5)",                        FALSE,        "ologit",   "concurrence",
+  "solidarite_pts",    "Même service partout (pts)",               FALSE,        "logit",    "solidarite",
+  "pro_nucleaire_pts", "Pro-nucléaire (0-100)",                    FALSE,        "logit",    "nucleaire_premier",
+  "malus_pts",         "Malus acceptable (pts)",                   FALSE,        "logit",    "mesure_malus",
+  "offre_verte_pts",   "Offre verte souscrite (pts)",              TRUE,         "logit",    "offre_verte",
+  "gestes_part_pts",   "Gestes faits / concernés (pts)",           TRUE,         "mco_sur9", "gestes_faits",
+  "axe_marche",        "Axe 1 du SP : pôle marché (ACM)",          FALSE,        "aucune",   NA,
+  "axe_nucleaire",     "Axe 1 de la transition : nucléaire (ACP)", FALSE,        "aucune",   NA
 )
+
+# L'axe du service public est construit à partir des questions de définition du
+# service public : on ne peut pas l'expliquer par elles.
+blocs_exclus <- list(axe_marche = "Conception du SP")
+
+
+##########################################
+### Trois outils pour l'estimation     ###
+##########################################
+
+# L'échantillon d'une position : les répondants qui ont répondu à la position et
+# à toutes les variables du modèle complet. Les huit personnes qui ont répondu
+# "Autre" au sexe sortent de ce fait des modèles.
+echantillon <- function(y, longs_seuls, noms_blocs) {
+  variables <- unname(c(y, "vague", unlist(blocs[noms_blocs])))
+  d <- if (longs_seuls) filter(df, long) else df
+  d |> drop_na(all_of(variables))
+}
+
+# Le R² pondéré d'un modèle linéaire qui ne contient que certains blocs
+r2 <- function(d, y, noms_blocs) {
+  variables <- c("vague", unlist(blocs[noms_blocs]))
+  summary(lm(reformulate(variables, y), data = d, weights = poids_norm))$r.squared
+}
+
+# La décomposition de Shapley. La contribution d'un bloc est le gain moyen de R²
+# quand on l'ajoute au modèle, en moyenne sur tous les ordres possibles d'entrée
+# des blocs. Les contributions s'additionnent exactement : leur somme vaut le R²
+# du modèle complet, moins celui du modèle qui ne contient que la vague.
+# Avec 7 blocs, cela demande d'estimer 2^7 = 128 modèles par position.
+shapley <- function(d, y, noms_blocs) {
+  k <- length(noms_blocs)
+  # Toutes les combinaisons de blocs : la ligne i contient les blocs inclus
+  combinaisons <- as.matrix(expand.grid(rep(list(c(FALSE, TRUE)), k)))
+  r2_combinaisons <- apply(combinaisons, 1, function(inclus) r2(d, y, noms_blocs[inclus]))
+  # Avec expand.grid, ajouter le bloc j à la combinaison i mène à la ligne i + 2^(j-1)
+  sapply(seq_len(k), function(j) {
+    sans_j <- which(!combinaisons[, j])
+    taille <- rowSums(combinaisons[sans_j, , drop = FALSE])
+    poids_ordre <- factorial(taille) * factorial(k - taille - 1) / factorial(k)
+    sum(poids_ordre * (r2_combinaisons[sans_j + 2^(j - 1)] - r2_combinaisons[sans_j]))
+  }) |>
+    setNames(noms_blocs)
+}
+
+
+#####################################
+### Estimation, position par position ###
+#####################################
+
+resultats <- list()
+
+for (i in seq_len(nrow(positions))) {
+  y <- positions$variable[i]
+  noms_blocs <- setdiff(names(blocs), blocs_exclus[[y]])
+  d <- echantillon(y, positions$longs_seuls[i], noms_blocs)
+  plan <- svydesign(ids = ~1, weights = ~poids_norm, data = d)
+
+  # Les modèles emboîtés (le M4 de l'axe du SP n'a pas le dernier bloc)
+  emboites <- lapply(modeles_emboites, intersect, noms_blocs)
+  formules <- lapply(emboites, function(b) reformulate(c("vague", unlist(blocs[b])), y))
+
+  resultats[[y]] <- list(
+    n        = nrow(d),
+    moyenne  = weighted.mean(d[[y]], d$poids_norm),
+    r2       = sapply(emboites, function(b) r2(d, y, b)),
+    shapley  = shapley(d, y, noms_blocs),
+    M1       = svyglm(formules$M1, design = plan),
+    M4       = svyglm(formules$M4, design = plan),
+    plan     = plan,
+    formule  = formules$M4
+  )
+  message(positions$nom[i], " : n = ", nrow(d))
+}
+
+
+###########################################
+### 1. Les R² des modèles emboîtés      ###
+###########################################
+
+tableau_r2 <- positions |>
+  select(variable, nom) |>
+  mutate(n       = map_dbl(resultats, "n"),
+         moyenne = map_dbl(resultats, "moyenne"),
+         R2_M1   = map_dbl(resultats, ~ .x$r2["M1"]),
+         R2_M2   = map_dbl(resultats, ~ .x$r2["M2"]),
+         R2_M3   = map_dbl(resultats, ~ .x$r2["M3"]),
+         R2_M4   = map_dbl(resultats, ~ .x$r2["M4"]))
+
+tableau_r2 |> mutate(across(where(is.numeric), ~ round(.x, 3)))
+write_csv2(tableau_r2, file.path(dossier, "01_R2_modeles_emboites.csv"))
+
+# Lecture :
+#   - le nucléaire se détache nettement : R² de 0.161 pour le score
+#     pro-nucléaire, et 0.143 pour l'axe nucléaire de l'ACP ;
+#   - ce R² vient presque entièrement du profil social : 0.140 dès M1 ;
+#   - la part des gestes faits atteint 0.096, mais par le rapport à l'énergie
+#     (de 0.038 en M2 à 0.096 en M3) ;
+#   - les positions sur la gouvernance (décentralisation, concurrence,
+#     solidarité, axe "marché" du SP) restent sous 0.045 : elles sont très peu
+#     prévisibles par le profil social ou le rapport à l'énergie ;
+#   - pour comparaison, l'ancien script obtenait 0.15 à 0.17 sur le score
+#     pro-nucléaire, mais sur 1644 personnes seulement (classements complets
+#     exigés) ; on en garde ici 2630.
+
+
+#############################################
+### 2. La décomposition du R² (Shapley)   ###
+#############################################
+
+tableau_shapley <- map_dfr(names(resultats), function(y) {
+  tibble(variable = y, bloc = names(resultats[[y]]$shapley),
+         contribution = resultats[[y]]$shapley)
+}) |>
+  group_by(variable) |>
+  mutate(part = 100 * contribution / sum(contribution)) |>
+  ungroup() |>
+  left_join(positions |> select(variable, nom), by = "variable")
+
+# En colonnes, la part du R² expliqué qui revient à chaque bloc (en %)
+tableau_shapley |>
+  select(nom, bloc, part) |>
+  mutate(part = round(part)) |>
+  pivot_wider(names_from = bloc, values_from = part)
+
+write_csv2(tableau_shapley, file.path(dossier, "02_decomposition_shapley.csv"))
+
+# Lecture des parts :
+#   - nucléaire : le sexe pèse 37 % du R² expliqué, l'âge 24 %, le rapport à
+#     l'énergie 15 % (connaissance du réseau), le revenu 10 %. Même structure
+#     pour l'axe nucléaire de l'ACP (sexe 31 %, âge 25 %). C'est la seule
+#     position où le sexe compte ;
+#   - gouvernance (décentralisation, solidarité, axe "marché") : l'âge et les
+#     conditions de vie font l'essentiel d'un R² très faible ;
+#   - concurrence : la conception du service public pèse 58 % ; une définition
+#     par la mission plutôt que par l'organisme va avec la concurrence ;
+#   - gestes et offre verte : le rapport à l'énergie (l'intérêt surtout) pèse
+#     64 % et 30 %, l'âge 16 % et 35 %.
+
+# La figure : la contribution de chaque bloc, en points de R²
+tableau_shapley |>
+  mutate(nom  = fct_reorder(nom, contribution, sum),
+         bloc = factor(bloc, levels = names(blocs))) |>
+  ggplot(aes(x = contribution, y = nom, fill = bloc)) +
+  geom_col() +
+  scale_fill_manual(values = c("#235E86", "#5A8FBF", "#9BBFDD", "#CADCEB",
+                               "#E0A458", "#B34E3F", "#6B8F5E")) +
+  labs(title = "Ce qui explique chaque position : décomposition du R²",
+       subtitle = "Contributions de Shapley ; somme = R² du modèle complet (hors vague)",
+       x = "Part de la variance expliquée (R²)", y = NULL, fill = "Bloc") +
+  theme_minimal(base_size = 11)
+ggsave(file.path(dossier, "figure_1_decomposition_R2.pdf"), width = 11, height = 6)
+
+
+###################################
+### 3. Les coefficients         ###
+###################################
+
+# Les coefficients de M1 (profil social seul) et de M4 (modèle complet) : la
+# comparaison montre ce que les représentations absorbent de l'effet du profil.
+extraire <- function(modele, y, nom_modele) {
+  s <- summary(modele)$coefficients
+  ic <- confint(modele)
+  tibble(variable = y, modele = nom_modele, terme = rownames(s),
+         estimation = s[, 1], ecart_type = s[, 2], p = s[, 4],
+         ic_bas = ic[, 1], ic_haut = ic[, 2])
+}
+
+coefficients <- map_dfr(names(resultats), function(y) {
+  bind_rows(extraire(resultats[[y]]$M1, y, "M1"),
+            extraire(resultats[[y]]$M4, y, "M4"))
+})
+write_csv2(coefficients, file.path(dossier, "03_coefficients.csv"))
+
+# Un tableau lisible du modèle complet : une colonne par position, le
+# coefficient et ses étoiles
+etoiles <- function(p) case_when(p < .001 ~ "***", p < .01 ~ "**", p < .05 ~ "*", TRUE ~ "")
+
+tableau_M4 <- coefficients |>
+  filter(modele == "M4") |>
+  mutate(cellule = paste0(formatC(estimation, format = "f", digits = 2), etoiles(p))) |>
+  select(terme, variable, cellule) |>
+  pivot_wider(names_from = variable, values_from = cellule, values_fill = "")
+tableau_M4
+write_csv2(tableau_M4, file.path(dossier, "04_tableau_M4.csv"))
+
+# La même chose en LaTeX
+knitr::kable(tableau_M4, format = "latex", booktabs = TRUE,
+             caption = "Modèle complet (M4), MCO pondérés. * p < 0,05 ; ** p < 0,01 ; *** p < 0,001") |>
+  writeLines(file.path(dossier, "04_tableau_M4.tex"))
 
 
 #################################################
-### Fonctions pour estimer à échantillon commun ###
+### 4. Tests par bloc et tests multiples      ###
 #################################################
 
-preparer_plan <- function(formules, longs = FALSE, hf = FALSE,
-                          observes = FALSE, base = plan_complet) {
-  variables <- unique(unlist(lapply(formules, all.vars)))
-  absentes <- setdiff(variables, names(df))
-  if (length(absentes)) stop("Colonnes absentes : ", paste(absentes, collapse = ", "))
-  inclusion <- complete.cases(df[, variables, drop = FALSE])
-  if (longs) inclusion <- inclusion & df$long
-  if (hf) inclusion <- inclusion & as.character(df$SEXE) %in% c("Homme", "Femme")
-  if (observes) inclusion <- inclusion & df$controles_observes
-  inclusion[is.na(inclusion)] <- FALSE
-  subset(base, inclusion)
-}
-
-ajuster <- function(formule, plan) {
-  tryCatch({
-    # Un plan calé conserve les lignes hors domaine avec un poids nul.
-    # Les contrôles portent sur les observations qui contribuent au modèle.
-    w <- as.numeric(weights(plan))
-    if (any(!is.finite(w) | w < 0)) stop("Poids du plan invalides.")
-    d <- plan$variables[w > 0, , drop = FALSE]
-    if (nrow(d) < 10) stop("Moins de 10 observations complètes.")
-    if (anyNA(d[, all.vars(formule), drop = FALSE])) {
-      stop("Valeurs manquantes dans le domaine : vérifier preparer_plan().")
-    }
-    reponse <- all.vars(formule)[1]
-    if (length(unique(d[[reponse]])) < 2) {
-      stop("Réponse constante dans cet échantillon.")
-    }
-    # Retirer seulement les termes constants dans le domaine : par exemple
-    # questionnaire dans une analyse exclusivement sur les longs.
-    termes <- attr(terms(formule), "term.labels")
-    garder <- vapply(termes, function(t) {
-      variables <- all.vars(as.formula(paste("~", t)))
-      all(vapply(variables, function(v) {
-        length(unique(d[[v]])) > 1
-      }, logical(1)))
-    }, logical(1))
-    retires <- termes[!garder]
-    f <- reformulate(if (any(garder)) termes[garder] else "1",
-                     response = reponse, env = baseenv())
-    
-    # NA retire les lignes de poids nul de l'ajustement et des niveaux des facteurs.
-    # Le plan conserve ces lignes pour calculer la variance liée au calage.
-    plan$variables[[reponse]][w == 0] <- NA_real_
-    modele <- svyglm(f, design = plan, family = gaussian(), na.action = na.omit)
-    attr(modele, "termes_constants_retires") <- retires
-    if (anyNA(modele$coefficients)) {
-      warning("Coefficients non identifiés : vérifier la table diagnostic_modeles.csv.")
-    }
-    modele
-  }, error = function(e) {
-    warning(paste(deparse(formule), collapse = " "), " : ", conditionMessage(e))
-    structure(list(formule = formule, erreur = conditionMessage(e)),
-              class = "modele_non_estime")
+# Pour chaque position et chaque bloc, un test de Wald : le bloc est-il associé
+# à la position, une fois les autres blocs contrôlés ? On corrige ensuite les
+# p-valeurs pour les tests multiples (Benjamini-Hochberg), puisqu'on fait
+# 9 positions x 7 blocs = 62 tests.
+tests <- map_dfr(names(resultats), function(y) {
+  noms_blocs <- setdiff(names(blocs), blocs_exclus[[y]])
+  map_dfr(noms_blocs, function(b) {
+    test <- regTermTest(resultats[[y]]$M4, reformulate(blocs[[b]]), method = "Wald")
+    tibble(variable = y, bloc = b, p = as.numeric(test$p))
   })
-}
+}) |>
+  mutate(p_BH = p.adjust(p, method = "BH"))
 
-formule_modele <- function(y, variables) {
-  reformulate(variables, response = y, env = baseenv())
-}
+tests |>
+  mutate(p_BH = round(p_BH, 3)) |>
+  select(-p) |>
+  pivot_wider(names_from = bloc, values_from = p_BH)
+write_csv2(tests, file.path(dossier, "05_tests_blocs.csv"))
 
-modele_valide <- function(m) inherits(m, "svyglm")
-
-tests_globaux <- list()
-ajouter_test <- function(m, termes, bloc, identifiant, famille = "Exploratoire") {
-  if (!modele_valide(m)) return(invisible(NULL))
-  resultat <- tryCatch(
-    regTermTest(m, as.formula(paste("~", paste(termes, collapse = " + "))),
-                method = "Wald"),
-    error = function(e) NULL
-  )
-  tests_globaux[[length(tests_globaux) + 1L]] <<- data.frame(
-    bloc = bloc, modele = identifiant, termes = paste(termes, collapse = " + "),
-    famille = famille, p = if (is.null(resultat)) NA_real_ else as.numeric(resultat$p),
-    test_estimable = !is.null(resultat)
-  )
-}
+# Après correction, le rapport à l'énergie (8 positions sur 9) et l'âge (7) sont
+# les blocs les plus souvent significatifs. Le sexe ne l'est que pour les deux
+# mesures du nucléaire. Le diplôme ne l'est pour aucune position, une fois les
+# autres blocs contrôlés.
 
 
-##################################
-### Régressions : blocs A à F   ###
-##################################
+#############################
+### 5. Robustesse         ###
+#############################
 
-# A0 : profil sociodémographique ; A1 : + logement/statut/difficultés ;
-# A2 : + territoire ; B1 : + réseau et intérêt ; B2 : total et intérêt ;
-# B3 : les deux domaines séparés et intérêt ;
-# C : conceptions du service public ; F : B3 et C réunis.
-#
-# Pour chaque réponse, les huit modèles utilisent les MÊMES individus.
-# Les scores de connaissance ne sont jamais inclus sous une forme colinéaire.
-
-positions <- data.frame(
-  variable = c("local", "concurrence", "solidarite_pts", "pro_nucleaire_pts",
-               "acc_malus_pts", "offre_verte_pts", "gestes_part_pts"),
-  nom = c("Organisation locale (1-5)", "Concurrence (1-5)",
-          "Solidarité territoriale (points)", "Priorité nucléaire (0-100)",
-          "Acceptation du malus (points)", "Offre verte souscrite (points)",
-          "Part des gestes réalisés (points)"),
-  longs = c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE)
-)
-
-modeles_positions <- list()
-formules_positions <- list()
-plans_positions <- list()
-
-for (i in seq_len(nrow(positions))) {
+# On réestime le modèle complet autrement, comme dans le script 7 :
+#   - en logit pour les positions binaires et pour le pro-nucléaire (le
+#     nucléaire en première production) ;
+#   - en logit ordonné pour les deux échelles de 1 à 5 ;
+#   - en MCO sur le nombre de gestes faits sur 9 pour les gestes ;
+#   - et, pour toutes les positions, sans les poids.
+# Puis on regarde si les coefficients significatifs gardent leur signe et leur
+# significativité. Les signes des coefficients se comparent d'une méthode à
+# l'autre, pas leur taille.
+robustesse <- map_dfr(seq_len(nrow(positions)), function(i) {
   y <- positions$variable[i]
-  fA0 <- formule_modele(y, controles_profil)
-  fA1 <- formule_modele(y, controles_complets)
-  fA2 <- update(fA1, . ~ . + zone)
-  fB1 <- update(fA2, . ~ . + conn_reseau + interet_energie)
-  fB2 <- update(fA2, . ~ . + score_connaissance + interet_energie)
-  fB3 <- update(fA2, . ~ . + conn_reseau + conn_fournisseurs + interet_energie)
-  fC <- update(fA2, . ~ . + service_public + sp_sans_profit)
-  fF <- update(fB3, . ~ . + service_public + sp_sans_profit)
-  formules <- list(A0 = fA0, A1 = fA1, A2 = fA2, B1_Reseau = fB1,
-                   B2_Total = fB2, B3_Deux_domaines = fB3, C = fC, F = fF)
-  plan <- preparer_plan(formules, longs = positions$longs[i])
-  modeles <- lapply(formules, ajuster, plan = plan)
-  modeles_positions[[y]] <- modeles
-  formules_positions[[y]] <- formules
-  plans_positions[[y]] <- plan
-  for (v in c("AGE_large", "SEXE", "diplome", "revenu", "zone")) {
-    ajouter_test(modeles$A2, v, "A2", y)
+  r <- resultats[[y]]
+  principal <- extraire(r$M4, y, "Principal")
+
+  sans_poids <- lm(r$formule, data = r$plan$variables)
+  alternatifs <- list(Sans_poids = tibble(terme = names(coef(sans_poids)),
+                                          estimation = coef(sans_poids),
+                                          p = summary(sans_poids)$coefficients[, 4]))
+
+  brute <- positions$brute[i]
+  if (positions$robuste[i] == "logit") {
+    logit <- svyglm(update(r$formule, reformulate(".", response = brute)),
+                    design = r$plan, family = quasibinomial())
+    s <- summary(logit)$coefficients
+    alternatifs$Logit <- tibble(terme = rownames(s), estimation = s[, 1], p = s[, 4])
   }
-  ajouter_test(modeles$B1_Reseau, "conn_reseau", "B1", y, "B1_reseau_7_positions")
-  ajouter_test(modeles$B1_Reseau, "interet_energie", "B1", y, "B1_interet_7_positions")
-  ajouter_test(modeles$B3_Deux_domaines, c("conn_reseau", "conn_fournisseurs"),
-               "B3", y, "B3_connaissance_7_positions")
-  ajouter_test(modeles$C, "service_public", "C", y, "C_service_public_7_positions")
-}
-
-# Exemples de lecture, comme dans ton script :
-if (modele_valide(modeles_positions$concurrence$B3_Deux_domaines)) {
-  print(summary(modeles_positions$concurrence$B3_Deux_domaines))
-}
-if (modele_valide(modeles_positions$solidarite_pts$F)) {
-  print(summary(modeles_positions$solidarite_pts$F))
-}
-
-
-# Bloc D : disposition à payer, scepticisme et souscription
-#---------------------------------------------------------
-
-fD0 <- formule_modele("offre_verte_pts", c(controles_complets, "zone"))
-fD1 <- update(fD0, . ~ . + vert_c + scepticisme)
-fD2 <- update(fD1, . ~ . + vert_c:scepticisme)
-plan_D <- preparer_plan(list(fD0, fD1, fD2), longs = TRUE)
-modeles_D <- list(
-  Profil = ajuster(fD0, plan_D),
-  Additif = ajuster(fD1, plan_D),
-  Interaction = ajuster(fD2, plan_D)
-)
-ajouter_test(modeles_D$Interaction, "vert_c:scepticisme", "D", "offre_verte_pts")
-# vert_c = 0 correspond à une disposition à payer égale à 3.
-# Le coefficient d'interaction est la différence de pente en points.
-
-
-# Bloc E : profils associés aux variables explicatives
-#-----------------------------------------------------
-
-explicatives <- c("conn_reseau", "conn_fournisseurs", "score_connaissance",
-                  "interet_energie", "interet_transition", "sp_organisme_pts",
-                  "sp_mission_pts", "sp_sans_profit_pts", "vert", "scepticisme_pts")
-modeles_E <- list()
-for (y in explicatives) {
-  f1 <- formule_modele(y, controles_profil)
-  f2 <- formule_modele(y, c(controles_complets, "zone"))
-  plan <- preparer_plan(list(f1, f2), longs = y %in% c("vert", "scepticisme_pts"))
-  modeles_E[[y]] <- list(Profil = ajuster(f1, plan), Complet = ajuster(f2, plan))
-}
-# Les deux modèles Organisme/Mission décrivent des probabilités linéaires.
-# Ils ne constituent pas un modèle multinomial conjoint.
-
-
-##########################################
-### Questions de ton script initial    ###
-##########################################
-
-# On conserve les analyses des longs, et on ajoute l'ensemble long/court pour
-# les questions communes. Les contrôles sont sociodémographiques et territoriaux.
-modeles_questions <- list()
-for (population in c("Tous", "Longs")) {
-  for (y in c("conn_reseau", "conn_fournisseurs", "score_connaissance")) {
-    f1 <- formule_modele(y, c(controles_profil, "zone", "interet_energie"))
-    f2 <- formule_modele(y, c(controles_profil, "zone", "service_public"))
-    f3 <- update(f1, . ~ . + service_public)
-    plan <- preparer_plan(list(f1, f2, f3), longs = population == "Longs")
-    nom <- paste(population, y, sep = "_")
-    modeles_questions[[nom]] <- list(
-      Interet = ajuster(f1, plan),
-      Service_public = ajuster(f2, plan),
-      Les_deux = ajuster(f3, plan)
-    )
-    ajouter_test(modeles_questions[[nom]]$Service_public, "service_public", "Questions", nom)
+  if (positions$robuste[i] == "mco_sur9") {
+    sur9 <- svyglm(update(r$formule, reformulate(".", response = brute)), design = r$plan)
+    s <- summary(sur9)$coefficients
+    alternatifs$Gestes_sur_9 <- tibble(terme = rownames(s), estimation = s[, 1], p = s[, 4])
   }
-  f <- formule_modele("interet_energie", c(controles_profil, "zone", "service_public"))
-  plan <- preparer_plan(list(f), longs = population == "Longs")
-  nom <- paste0(population, "_interet_service_public")
-  modeles_questions[[nom]] <- list(Interet = ajuster(f, plan))
-  ajouter_test(modeles_questions[[nom]]$Interet, "service_public", "Questions", nom)
-}
-
-
-####################################
-### Régressions complémentaires   ###
-####################################
-
-### Interactions âge x sexe
-
-# Les modèles principaux ci-dessus gardent tout le monde, dont Autre.
-# On tente également l'interaction complète, en signalant toute non-identification.
-# Une seconde analyse H/F est une annexe explicitement limitée à H/F ;
-# elle ne remplace jamais les modèles principaux et ne modifie aucun poids.
-modeles_interactions <- list()
-for (y in c("conn_reseau", "score_connaissance", "interet_energie", "local",
-            "concurrence", "solidarite_pts", "indice_solidarite_monopole")) {
-  f0 <- formule_modele(y, c(controles_profil, "zone"))
-  f1 <- update(f0, . ~ . + AGE_large:SEXE)
-  plan <- preparer_plan(list(f0, f1), longs = TRUE)
-  plan_HF <- preparer_plan(list(f0, f1), longs = TRUE, hf = TRUE)
-  modeles_interactions[[y]] <- list(
-    Additif_tous_sexes = ajuster(f0, plan),
-    Interaction_tous_sexes = ajuster(f1, plan),
-    Additif_HF = ajuster(f0, plan_HF),
-    Interaction_HF = ajuster(f1, plan_HF)
-  )
-  ajouter_test(modeles_interactions[[y]]$Interaction_tous_sexes,
-               "AGE_large:SEXE", "Interaction_tous_sexes", y)
-  ajouter_test(modeles_interactions[[y]]$Interaction_HF,
-               "AGE_large:SEXE", "Interaction_HF", y)
-}
-
-
-### Sensibilités : poids, population, non-réponse, intérêt pour la transition
-
-modeles_sensibilite <- list()
-for (i in seq_len(nrow(positions))) {
-  y <- positions$variable[i]
-  f <- formules_positions[[y]]$B3_Deux_domaines
-  plan <- plans_positions[[y]]
-  # Réutiliser exactement le masque du plan principal pour l'analyse non pondérée.
-  variables <- unique(unlist(lapply(formules_positions[[y]], all.vars)))
-  inclusion <- complete.cases(df[, variables, drop = FALSE])
-  if (positions$longs[i]) inclusion <- inclusion & df$long
-  plan_sans_poids <- subset(plan_non_pondere, inclusion)
-  plan_sans_calage_sexe <- subset(plan_age_zone, inclusion)
-  f_transition <- update(f, . ~ . + interet_transition)
-  plan_transition <- preparer_plan(c(formules_positions[[y]], list(f_transition)),
-                                   longs = positions$longs[i])
-  plan_observe <- preparer_plan(formules_positions[[y]],
-                                longs = positions$longs[i], observes = TRUE)
-  modeles_sensibilite[[y]] <- list(
-    Principal_pondere = ajuster(f, plan),
-    Sans_poids = ajuster(f, plan_sans_poids),
-    Calage_age_zone_seulement = ajuster(f, plan_sans_calage_sexe),
-    Controles_observes = ajuster(f, plan_observe),
-    Transition_reference = ajuster(f, plan_transition),
-    Transition_ajoutee = ajuster(f_transition, plan_transition)
-  )
-  if (!positions$longs[i]) {
-    plan_longs <- preparer_plan(formules_positions[[y]], longs = TRUE)
-    modeles_sensibilite[[y]]$Longs <- ajuster(f, plan_longs)
+  if (positions$robuste[i] == "ologit") {
+    formule_ord <- update(r$formule, reformulate(".", response = paste0("factor(", brute, ")")))
+    ordonne <- svyolr(formule_ord, design = r$plan)
+    cf <- coef(ordonne)
+    se <- sqrt(diag(vcov(ordonne)))[names(cf)]
+    alternatifs$Logit_ordonne <- tibble(terme = names(cf), estimation = cf,
+                                        p = 2 * pnorm(-abs(cf / se)))
   }
-  # La comparaison principale / contrôles observés ou longs change de population.
-  # La paire Transition_reference/ajoutée utilise exactement les mêmes personnes.
-}
+
+  map_dfr(names(alternatifs), function(a) {
+    principal |>
+      select(terme, estimation, p) |>
+      inner_join(alternatifs[[a]], by = "terme", suffix = c("", "_alt")) |>
+      filter(terme != "(Intercept)") |>
+      mutate(variable = y, methode = a)
+  })
+}) |>
+  mutate(accord = case_when(
+    p < .05 & p_alt < .05 & sign(estimation) == sign(estimation_alt) ~ "les deux, même signe",
+    p < .05 & p_alt < .05                                            ~ "signes opposés",
+    p < .05                                                          ~ "principal seulement",
+    p_alt < .05                                                      ~ "robuste seulement",
+    TRUE                                                             ~ "aucun"
+  ))
+
+table(robustesse$methode, robustesse$accord)
+write_csv2(robustesse, file.path(dossier, "06_robustesse.csv"))
+
+# Aucun coefficient significatif ne change de signe, et les désaccords de
+# significativité sont rares (21 sur 457 comparaisons, dont 8 pour les gestes,
+# où le nombre sur 9 ne mesure pas la même chose que la part) : les résultats
+# ne tiennent ni aux poids, ni au choix du modèle linéaire.
 
 
-### Territoire : avec et sans logement/statut, zone2/zone3/taille
+#####################################
+### 6. Focus sur le nucléaire     ###
+#####################################
 
-modeles_territoire <- list()
-territoires <- c("zone", if (variable_zone != "zone2") "zone2",
-                 if ("taille" %in% names(df)) "taille")
-for (i in seq_len(nrow(positions))) {
-  y <- positions$variable[i]
-  formules <- list()
-  for (v in territoires) {
-    formules[[paste0(v, "_Complet")]] <- formule_modele(y, c(controles_complets, v))
-    formules[[paste0(v, "_Sans_logement_statut")]] <- formule_modele(
-      y, c(controles_sans_logement, v))
-  }
-  plan <- preparer_plan(formules, longs = positions$longs[i])
-  modeles_territoire[[y]] <- lapply(formules, ajuster, plan = plan)
-}
+### Les moyennes pondérées, par sexe et par âge
 
+# Le résultat le plus net, décrit sans modèle : le score pro-nucléaire moyen
+# (de 0 à 100), et la part de répondants qui placent le nucléaire en première
+# production
+plan_tous <- svydesign(ids = ~1, weights = ~poids_norm,
+                       data = df |> filter(!is.na(pro_nucleaire), !is.na(sexe)))
+parts_nucleaire <- svyby(~ pro_nucleaire_pts + nucleaire_premier_pts, ~ sexe + AGE_large,
+                         plan_tous, svymean)
+parts_nucleaire
+write_csv2(as.data.frame(parts_nucleaire), file.path(dossier, "07_nucleaire_sexe_age.csv"))
 
-### Autres définitions et indicateurs
+# À tout âge, les hommes sont nettement plus pro-nucléaires que les femmes :
+# 46 contre 23 chez les 18-34 ans, 71 contre 50 chez les 65 ans et plus. En
+# première production, l'écart est du simple au double : 41 % contre 17 % chez
+# les 18-34 ans, 67 % contre 40 % chez les 65 ans et plus.
 
-modeles_complements <- list()
-f <- formules_positions$gestes_part_pts$B3_Deux_domaines
-plan <- preparer_plan(c(formules_positions$gestes_part_pts,
-                        list(update(f, gestes_n ~ .))), longs = TRUE)
-modeles_complements$Gestes <- list(
-  Part = ajuster(f, plan),
-  Nombre = ajuster(update(f, gestes_n ~ .), plan)
-)
-f <- formules_positions$pro_nucleaire_pts$B3_Deux_domaines
-formules <- list(
-  Composite = f,
-  Production = update(f, nuc_production ~ .),
-  Levier = update(f, nuc_levier ~ .),
-  Premier = update(f, nuc_premier_pts ~ .)
-)
-plan <- preparer_plan(c(formules_positions$pro_nucleaire_pts, formules))
-modeles_complements$Nucleaire <- lapply(formules, ajuster, plan = plan)
+### L'écart entre hommes et femmes varie-t-il avec l'âge ou le diplôme ?
 
-for (y in c("acc_bonus_pts", "acc_invest_public_pts", "acc_regulation_pts",
-            "acc_information_pts", "anc_collectivites_pts", "anc_porteur_local_pts",
-            "anc_auto_collective_pts", "indice_solidarite_monopole")) {
-  f <- formule_modele(y, c(controles_complets, "zone", "conn_reseau",
-                           "conn_fournisseurs", "interet_energie"))
-  plan <- preparer_plan(list(f), longs = y %in% c("anc_porteur_local_pts",
-                                                  "anc_auto_collective_pts"))
-  modeles_complements[[y]] <- list(Complet = ajuster(f, plan))
-}
-
-# Connaissance : NSP et erreurs parmi les répondants sont deux issues distinctes.
-formules <- lapply(c("conn_reseau", "conn_nb_nsp"), function(y) {
-  formule_modele(y, c(controles_complets, "zone"))
-})
-plan <- preparer_plan(formules)
-f_repondants <- formule_modele("conn_juste_si_repond", c(controles_complets, "zone"))
-plan_repondants <- preparer_plan(c(formules, list(f_repondants)))
-modeles_complements$Connaissance_NSP <- list(
-  Score_reseau = ajuster(formules[[1]], plan),
-  Nombre_NSP = ajuster(formules[[2]], plan),
-  Juste_si_repond = ajuster(f_repondants, plan_repondants)
-)
-for (a in names(roles)) {
-  f <- formule_modele(paste0("juste_", a), c(controles_complets, "zone"))
-  plan <- preparer_plan(list(f))
-  modeles_complements[[paste0("Connaissance_", a)]] <- list(Item = ajuster(f, plan))
-}
+r <- resultats$pro_nucleaire_pts
+interaction_age     <- svyglm(update(r$formule, . ~ . + sexe:age_tranche), design = r$plan)
+interaction_diplome <- svyglm(update(r$formule, . ~ . + sexe:diplome), design = r$plan)
+regTermTest(interaction_age, ~ sexe:age_tranche)
+regTermTest(interaction_diplome, ~ sexe:diplome)
+summary(interaction_diplome)$coefficients[grep("sexeFemme", names(coef(interaction_diplome))), ]
+# Avec le score pro-nucléaire, l'écart entre femmes et hommes varie avec l'âge
+# (p = 0.018) : il est le plus grand chez les 18-34 ans (- 25 points, à autres
+# caractéristiques égales) et le plus faible chez les 35-49 ans (- 12 points).
+# Il ne varie pas significativement avec le diplôme (p = 0.23), même si l'écart
+# se réduit chez les bac+5 (+ 10 points, p = 0.02).
+# Attention : avec le nucléaire en première production (ancienne version de ce
+# script), c'était l'inverse (âge : p = 0.28 ; diplôme : p = 0.018). Ces
+# interactions dépendent donc de la mesure et restent fragiles.
 
 
-####################################
-### Description et vérifications  ###
-####################################
+##################################################################
+### 7. L'offre verte : la disposition à payer devient-elle un choix ? ###
+##################################################################
 
-correlation_ponderee <- function(x, y) {
-  i <- is.finite(x) & is.finite(y)
-  if (sum(i) < 3 || length(unique(x[i])) < 2 || length(unique(y[i])) < 2) {
-    return(NA_real_)
-  }
-  cov.wt(cbind(x[i], y[i]), wt = df$poids[i], cor = TRUE)$cor[1, 2]
-}
-correlations <- data.frame(
-  paire = c("RTE / Enedis", "EDF / Engie", "Réseau / fournisseurs",
-            "Intérêt énergie / transition", "Solidarité / monopole"),
-  Pearson_pondere = c(
-    correlation_ponderee(bons_roles[, "RTE"], bons_roles[, "Enedis"]),
-    correlation_ponderee(bons_roles[, "EDF"], bons_roles[, "Engie"]),
-    correlation_ponderee(df$conn_reseau, df$conn_fournisseurs),
-    correlation_ponderee(df$interet_energie, df$interet_transition),
-    correlation_ponderee(df$solidarite_01, df$monopole_01))
-)
-ecrire_csv(correlations, "correlations_scores.csv")
-# Pour les deux items binaires, il s'agit de phi pondéré.
-# Pas de changement automatique vers une corrélation tétrachorique.
+# Hypothèse H5 (bloc D du script 7) : la disposition à payer plus ne mène à
+# souscrire une offre verte que si l'on n'est pas sceptique envers ces offres.
+# Les contrôles sont ceux de M2, c'est-à-dire ceux du script 7 (profil, zone,
+# logement, statut, difficultés).
+d <- df |>
+  filter(long) |>
+  drop_na(offre_verte_pts, payer_vert, sceptique, vague, all_of(unname(unlist(blocs[modeles_emboites$M2]))))
+plan_vert <- svydesign(ids = ~1, weights = ~poids_norm, data = d)
+offre_verte <- svyglm(reformulate(c("payer_vert * sceptique", "vague",
+                                    unlist(blocs[modeles_emboites$M2])), "offre_verte_pts"),
+                      design = plan_vert)
+summary(offre_verte)$coefficients[c("payer_vert", "sceptique", "payer_vert:sceptique"), ]
 
-indicateurs <- unique(c(positions$variable, explicatives, "connaissance_moyenne",
-                        "gestes_n", "gestes_concernes",
-                        "indice_solidarite_monopole"))
-descriptifs <- bind_rows(lapply(indicateurs, function(v) {
-  bind_rows(lapply(c("Tous", "Longs", "Courts"), function(population) {
-    eligible <- switch(population, Tous = rep(TRUE, nrow(df)),
-                       Longs = df$long, Courts = !df$long)
-    i <- eligible & !is.na(df[[v]])
-    data.frame(
-      indicateur = v, population = population, n_eligible = sum(eligible),
-      n_observe = sum(i),
-      moyenne_ponderee = if (any(i)) weighted.mean(df[[v]][i], df$poids[i]) else NA_real_
-    )
-  }))
-}))
-ecrire_csv(descriptifs, "descriptifs.csv")
-ecrire_csv(as.data.frame(table(df$AGE_large, df$SEXE, useNA = "ifany")),
-           "effectifs_age_sexe.csv")
-ecrire_csv(as.data.frame(table(df$version_questionnaire, df$SEXE, useNA = "ifany")),
-           "effectifs_questionnaire_sexe.csv")
-ecrire_csv(diagnostic_redressement$cellules, "diagnostic_cellules_calage.csv")
-ecrire_csv(diagnostic_redressement$contraintes, "diagnostic_contraintes_calage.csv")
-ecrire_csv(data.frame(
-  n_avant = diagnostic_redressement$n_avant,
-  exclus_zone = diagnostic_redressement$exclus_zone,
-  exclus_age_apres_zone = diagnostic_redressement$exclus_age_apres_zone,
-  n_apres = diagnostic_redressement$n_apres
-), "diagnostic_exclusions_redressement.csv")
-references <- bind_rows(lapply(
-  c("AGE_large", "SEXE", "diplome", "revenu", "logement", "statut", "zone",
-    "questionnaire", "service_public", "vague"), function(v) {
-      data.frame(variable = v, reference = levels(df[[v]])[1],
-                 modalites = paste(levels(df[[v]]), collapse = " / "))
-    }))
-ecrire_csv(references, "references_facteurs.csv")
-denominateurs_gestes <- bind_rows(lapply(levels(df$statut), function(s) {
-  i <- df$long & df$statut == s & !is.na(df$gestes_concernes)
-  data.frame(statut = s, n = sum(i), nombre_concerne_moyen =
-               if (any(i)) weighted.mean(df$gestes_concernes[i], df$poids[i]) else NA_real_)
-}))
-ecrire_csv(denominateurs_gestes, "denominateurs_gestes.csv")
+# La même chose en logit, comme dans le script 7. En logit, l'interaction ne
+# mesure pas la même chose qu'en probabilité : à taux de base faible, un simple
+# décalage de niveau réduit la pente en points.
+offre_verte_logit <- svyglm(reformulate(c("payer_vert * sceptique", "vague",
+                                          unlist(blocs[modeles_emboites$M2])), "offre_verte"),
+                            design = plan_vert, family = quasibinomial())
+summary(offre_verte_logit)$coefficients[c("payer_vert", "sceptique", "payer_vert:sceptique"), ]
+# Chaque point de disposition à payer va avec 7.0 points de souscription en plus.
+# Le scepticisme réduit le niveau (- 5.7 points, p = 0.11 ; nettement en logit,
+# p < 0.001) mais pas la pente (interaction : p = 0.08 en probabilité, 0.70 en
+# logit) : l'hypothèse n'est pas confirmée.
 
 
-#################################################
-### Sorties des régressions : CSV et LaTeX     ###
-#################################################
+#######################
+### Sauvegarde      ###
+#######################
 
-# Aucune dépendance supplémentaire pour les tables.
-# Chaque groupe de modèles reçoit :
-# - un CSV numérique long, avec coefficient, SE, IC95 %, p et n ;
-# - un CSV large pour comparer les modèles ;
-# - un fichier .tex (longtable), à importer avec \input{...}.
-# Dans le préambule LaTeX : \usepackage{longtable}.
-
-ddl_modele <- function(m) {
-  ddl <- m$df.residual
-  if (length(ddl) != 1 || is.na(ddl) || ddl <= 0) NA_real_ else ddl
-}
-
-# Une seule source pour les données, les poids et l'effectif de chaque modèle.
-# prior.weights est aligné sur m$model, même après suppression des NA.
-donnees_modele <- function(m) {
-  d <- m$model
-  w <- as.numeric(m$prior.weights)
-  y <- as.numeric(m$y)
-  prediction <- as.numeric(m$fitted.values)
-  if (is.null(d) || nrow(d) != length(w) ||
-      length(y) != length(w) || length(prediction) != length(w)) {
-    stop("Données et poids non alignés dans le modèle.")
-  }
-  if (any(!is.finite(w) | w < 0)) stop("Poids du modèle invalides.")
-  
-  d$.poids <- w
-  d$.reponse <- y
-  d$.prediction <- prediction
-  d <- d[w > 0, , drop = FALSE]
-  if (!nrow(d)) stop("Aucune observation de poids positif.")
-  if (any(!is.finite(d$.reponse)) || any(!is.finite(d$.prediction))) {
-    stop("Réponse ou prédiction non finie dans le modèle.")
-  }
-  d
-}
-
-extraire_coefficients <- function(m, nom, groupe) {
-  if (!modele_valide(m)) return(data.frame())
-  d <- donnees_modele(m)
-  s <- summary(m)$coefficients
-  ddl <- ddl_modele(m)
-  q <- qt(.975, df = ddl)
-  data.frame(
-    groupe = groupe, modele = nom, terme = rownames(s),
-    estimation = s[, 1], ecart_type = s[, 2],
-    IC95_inf = s[, 1] - q * s[, 2], IC95_sup = s[, 1] + q * s[, 2],
-    p = s[, 4], n = nrow(d), ddl = ddl, row.names = NULL
-  )
-}
-
-diagnostic_modele <- function(m, nom, groupe) {
-  if (!modele_valide(m)) {
-    return(data.frame(
-      groupe = groupe, modele = nom, n = NA_real_, ESS_Kish = NA_real_,
-      R2_pondere = NA_real_, nb_coefficients_non_identifies = NA_integer_,
-      formule = paste(deparse(m$formule), collapse = " "),
-      termes_constants_retires = "", erreur = m$erreur
-    ))
-  }
-  d <- donnees_modele(m)
-  w <- d$.poids
-  y <- d$.reponse
-  moyenne <- weighted.mean(y, w)
-  erreur_residuelle <- sum(w * (y - d$.prediction)^2)
-  dispersion_totale <- sum(w * (y - moyenne)^2)
-  
-  data.frame(
-    groupe = groupe, modele = nom, n = nrow(d),
-    ESS_Kish = sum(w)^2 / sum(w^2),
-    R2_pondere = if (dispersion_totale > 0) {
-      1 - erreur_residuelle / dispersion_totale
-    } else NA_real_,
-    nb_coefficients_non_identifies = sum(is.na(m$coefficients)),
-    formule = paste(deparse(formula(m)), collapse = " "),
-    termes_constants_retires = paste(attr(m, "termes_constants_retires"), collapse = " / "),
-    erreur = ""
-  )
-}
-
-echapper_latex <- function(x) {
-  caracteres <- c("\\", "&", "%", "$", "#", "_", "{", "}", "~", "^", "<", ">")
-  remplacements <- c("\\textbackslash{}", "\\&", "\\%", "\\$", "\\#", "\\_",
-                     "\\{", "\\}", "\\textasciitilde{}", "\\textasciicircum{}",
-                     "\\textless{}", "\\textgreater{}")
-  dictionnaire <- setNames(remplacements, caracteres)
-  x <- as.character(x)
-  x[is.na(x)] <- ""
-  vapply(x, function(z) {
-    lettres <- strsplit(gsub("[\r\n\t]", " ", z), "", fixed = TRUE)[[1]]
-    paste(vapply(lettres, function(a) {
-      if (a %in% names(dictionnaire)) dictionnaire[[a]] else a
-    }, character(1)), collapse = "")
-  }, character(1), USE.NAMES = FALSE)
-}
-
-formater <- function(x, dec = 3) {
-  ifelse(is.finite(x), formatC(x, digits = dec, format = "f", decimal.mark = ","), "")
-}
-etoiles <- function(p) {
-  ifelse(is.na(p), "", ifelse(p < .001, "***", ifelse(p < .01, "**",
-                                                      ifelse(p < .05, "*", ""))))
-}
-
-exporter_table <- function(modeles, nom_fichier, titre = nom_fichier) {
-  # Le CSV numérique long reste la référence pour comparer les calculs.
-  longs <- bind_rows(lapply(names(modeles), function(nom) {
-    extraire_coefficients(modeles[[nom]], nom, nom_fichier)
-  }))
-  diagnostics <- bind_rows(lapply(names(modeles), function(nom) {
-    diagnostic_modele(modeles[[nom]], nom, nom_fichier)
-  }))
-  ecrire_csv(longs, paste0(nom_fichier, "_coefficients.csv"))
-  ecrire_csv(diagnostics, paste0(nom_fichier, "_diagnostics.csv"))
-  if (!nrow(longs)) return(invisible(NULL))
-  
-  noms <- names(modeles)
-  termes <- unique(longs$terme)
-  lignes <- c(termes, "N non pondéré", "R2 pondéré", "ESS Kish (indicatif)")
-  large <- data.frame(terme = lignes, stringsAsFactors = FALSE)
-  cellules_tex <- matrix("", length(lignes), length(noms))
-  
-  for (j in seq_along(noms)) {
-    m <- modeles[[noms[j]]]
-    colonne <- rep("", length(lignes))
-    if (modele_valide(m)) {
-      cc <- longs[longs$modele == noms[j], , drop = FALSE]
-      for (i in seq_along(termes)) {
-        k <- match(termes[i], cc$terme)
-        if (!is.na(k)) {
-          estimation <- paste0(formater(cc$estimation[k]), etoiles(cc$p[k]))
-          se <- paste0("(", formater(cc$ecart_type[k]), ")")
-          colonne[i] <- paste(estimation, se)
-          cellules_tex[i, j] <- paste0("\\shortstack{", estimation, "\\\\", se, "}")
-        }
-      }
-      dd <- diagnostics[diagnostics$modele == noms[j], , drop = FALSE]
-      supplement <- c(as.character(dd$n), formater(dd$R2_pondere), formater(dd$ESS_Kish, 1))
-      colonne[length(termes) + 1:3] <- supplement
-      cellules_tex[length(termes) + 1:3, j] <- supplement
-    } else {
-      colonne[] <- "Non estimé"
-      cellules_tex[, j] <- "\\textit{Non estimé}"
-    }
-    large[[noms[j]]] <- colonne
-  }
-  ecrire_csv(large, paste0(nom_fichier, "_table.csv"))
-  
-  # Colonnes à largeur fixe : retour à la ligne des noms longs et tables
-  # pouvant se poursuivre sur la page suivante grâce à longtable.
-  largeur <- formatC(.62 / length(noms), format = "f", digits = 4, decimal.mark = ".")
-  definition <- paste0("p{0.30\\textwidth}", paste0(
-    rep(paste0("p{", largeur, "\\textwidth}"), length(noms)), collapse = ""))
-  entete <- paste(c("Variable", echapper_latex(gsub("_", " ", noms, fixed = TRUE))),
-                  collapse = " & ")
-  latex <- c(
-    "% Généré par 2_Regressions_lineaires.R ; UTF-8 ; requiert longtable.",
-    "\\begingroup", "\\scriptsize", "\\setlength{\\tabcolsep}{2pt}",
-    paste0("\\begin{longtable}{", definition, "}"),
-    paste0("\\caption{", echapper_latex(titre), "}\\\\"),
-    "\\hline", paste0(entete, " \\\\"), "\\hline", "\\endfirsthead",
-    "\\hline", paste0(entete, " \\\\"), "\\hline", "\\endhead"
-  )
-  for (i in seq_along(lignes)) {
-    latex <- c(latex, paste0(paste(c(echapper_latex(lignes[i]), cellules_tex[i, ]),
-                                   collapse = " & "), " \\\\"))
-  }
-  note <- paste(
-    "Régressions linéaires ; erreurs-types survey entre parenthèses.",
-    "Poids et calage selon la colonne ; Sans poids désigne l'annexe non pondérée.",
-    "* p < 0,05 ; ** p < 0,01 ; *** p < 0,001.",
-    "IC95 % et p exacts dans le CSV numérique. ESS : dispersion des poids seulement.",
-    "Une colonne vide ou non estimée doit être vérifiée dans les diagnostics."
-  )
-  latex <- c(latex, "\\hline", "\\end{longtable}",
-             paste0("\\noindent\\parbox{\\textwidth}{", echapper_latex(note), "}"),
-             "\\endgroup")
-  writeLines(latex, file.path(dossier_sortie, paste0(nom_fichier, ".tex")), useBytes = FALSE)
-  invisible(longs)
-}
-
-groupes_modeles <- list()
-for (y in names(modeles_positions)) groupes_modeles[[paste0("Positions_", y)]] <- modeles_positions[[y]]
-groupes_modeles$Bloc_D_offre_verte <- modeles_D
-for (y in names(modeles_E)) groupes_modeles[[paste0("Bloc_E_", y)]] <- modeles_E[[y]]
-for (y in names(modeles_questions)) groupes_modeles[[paste0("Questions_", y)]] <- modeles_questions[[y]]
-for (y in names(modeles_interactions)) groupes_modeles[[paste0("Interactions_", y)]] <- modeles_interactions[[y]]
-for (y in names(modeles_sensibilite)) groupes_modeles[[paste0("Sensibilite_", y)]] <- modeles_sensibilite[[y]]
-for (y in names(modeles_territoire)) groupes_modeles[[paste0("Territoire_", y)]] <- modeles_territoire[[y]]
-for (y in names(modeles_complements)) groupes_modeles[[paste0("Complement_", y)]] <- modeles_complements[[y]]
-
-for (nom in names(groupes_modeles)) {
-  exporter_table(groupes_modeles[[nom]], nom, gsub("_", " ", nom, fixed = TRUE))
-}
-coefficients_tous <- bind_rows(lapply(names(groupes_modeles), function(g) {
-  bind_rows(lapply(names(groupes_modeles[[g]]), function(nom) {
-    extraire_coefficients(groupes_modeles[[g]][[nom]], nom, g)
-  }))
-}))
-diagnostics_tous <- bind_rows(lapply(names(groupes_modeles), function(g) {
-  bind_rows(lapply(names(groupes_modeles[[g]]), function(nom) {
-    diagnostic_modele(groupes_modeles[[g]][[nom]], nom, g)
-  }))
-}))
-ecrire_csv(coefficients_tous, "coefficients_tous_modeles.csv")
-ecrire_csv(diagnostics_tous, "diagnostic_modeles.csv")
-
-# BH sur les familles de tests indiquées, pas sur toutes les analyses à la fois.
-tests <- bind_rows(tests_globaux)
-tests$p_BH <- NA_real_
-for (famille in setdiff(unique(tests$famille), "Exploratoire")) {
-  i <- tests$famille == famille & is.finite(tests$p)
-  tests$p_BH[i] <- p.adjust(tests$p[i], method = "BH")
-}
-ecrire_csv(tests, "tests_globaux_et_BH.csv")
-
-# Contrastes de l'interaction D : deux pentes et leur différence.
-contraste_lineaire <- function(m, termes, poids, nom) {
-  if (!modele_valide(m) || anyNA(m$coefficients)) return(data.frame())
-  if (!all(termes %in% names(coef(m)))) return(data.frame())
-  a <- setNames(rep(0, length(coef(m))), names(coef(m)))
-  a[termes] <- poids
-  estimation <- sum(a * coef(m))
-  se <- sqrt(max(0, as.numeric(t(a) %*% vcov(m) %*% a)))
-  ddl <- ddl_modele(m)
-  q <- qt(.975, df = ddl)
-  data.frame(contraste = nom, estimation = estimation, ecart_type = se,
-             IC95_inf = estimation - q * se, IC95_sup = estimation + q * se,
-             p = if (se > 0) 2 * pt(-abs(estimation / se), df = ddl) else NA_real_)
-}
-contrastes_D <- bind_rows(
-  contraste_lineaire(modeles_D$Interaction, "vert_c", 1, "Pente non-sceptiques"),
-  contraste_lineaire(modeles_D$Interaction, c("vert_c", "vert_c:scepticisme"),
-                     c(1, 1), "Pente sceptiques"),
-  contraste_lineaire(modeles_D$Interaction, "vert_c:scepticisme", 1,
-                     "Différence de pente")
-)
-ecrire_csv(contrastes_D, "contrastes_interaction_offre_verte.csv")
-
-# Le modèle avec le total impose la même pente à une bonne réponse de réseau
-# et de fournisseur. B3 permet de tester cette restriction, réponse par réponse.
-# Ce test porte sur les associations avec la réponse, pas sur l'unidimensionnalité
-# du score de connaissance.
-contrastes_domaines <- bind_rows(lapply(names(modeles_positions), function(y) {
-  z <- contraste_lineaire(
-    modeles_positions[[y]]$B3_Deux_domaines,
-    c("conn_reseau", "conn_fournisseurs"), c(1, -1),
-    "Coefficient réseau moins coefficient fournisseurs"
-  )
-  if (nrow(z)) z$reponse <- y
-  z
-}))
-if (nrow(contrastes_domaines)) {
-  contrastes_domaines$p_BH <- p.adjust(contrastes_domaines$p, method = "BH")
-}
-ecrire_csv(contrastes_domaines, "contrastes_reseau_fournisseurs.csv")
-
-# Comparer aussi les amplitudes par un écart-type pondéré du score.
-# La standardisation est calculée dans l'échantillon commun de chaque réponse.
-comparaison_scores <- list()
-for (y in names(modeles_positions)) {
-  correspondance <- c(B1_Reseau = "conn_reseau", B2_Total = "score_connaissance")
-  for (nom in names(correspondance)) {
-    v <- correspondance[[nom]]
-    m <- modeles_positions[[y]][[nom]]
-    if (!modele_valide(m) || !v %in% names(coef(m))) next
-    d <- donnees_modele(m)
-    w <- d$.poids
-    moyenne_score <- weighted.mean(d[[v]], w)
-    sd_score <- sqrt(weighted.mean((d[[v]] - moyenne_score)^2, w))
-    cc <- extraire_coefficients(m, nom, y)
-    cc <- cc[cc$terme == v, , drop = FALSE]
-    comparaison_scores[[paste(y, nom)]] <- data.frame(
-      reponse = y, modele = nom, score = v, n = nrow(d), SD_score = sd_score,
-      effet_par_1_SD = cc$estimation * sd_score,
-      IC95_inf = cc$IC95_inf * sd_score, IC95_sup = cc$IC95_sup * sd_score
-    )
-  }
-}
-ecrire_csv(bind_rows(comparaison_scores), "comparaison_scores_par_1_SD.csv")
-
-saveRDS(list(
-  modeles = groupes_modeles, coefficients = coefficients_tous,
-  diagnostics = diagnostics_tous, tests = tests, contrastes_D = contrastes_D,
-  contrastes_domaines = contrastes_domaines,
-  correlations = correlations, descriptifs = descriptifs,
-  diagnostic_redressement = diagnostic_redressement,
-  parametres = list(variable_zone = variable_zone, reference_revenu = levels(df$revenu)[1],
-                    classements_complets = classements_complets,
-                    colonne_nsp_acceptabilite = colonne_nsp_acceptabilite)
-), file.path(dossier_sortie, "resultats_regressions_lineaires.rds"))
-capture.output(sessionInfo(), file = file.path(dossier_sortie, "sessionInfo.txt"))
-writeLines(c(
-  "Tables générées par 2_Regressions_lineaires.R.",
-  "Tous les modèles : gaussiens à lien identité, y compris les issues binaires.",
-  "Pour LaTeX : ajouter \\usepackage{longtable} au préambule, puis \\input{chemin.tex}.",
-  "Chaque .tex a un CSV large (_table.csv) et un CSV numérique (_coefficients.csv).",
-  "coefficients_tous_modeles.csv contient les estimations, SE, IC95 %, p et n.",
-  "Les comparaisons A0/A1/A2/B1/B2/B3/C/F sont à échantillon identique par réponse.",
-  "En sensibilité, Sans_poids et Calage_age_zone_seulement reprennent cet échantillon.",
-  "Les sous-domaines Longs et Contrôles observés changent explicitement d'échantillon.",
-  "Les coefficients des issues _pts sont en points sur une échelle 0-100.",
-  "Les probabilités linéaires peuvent être prédites hors de [0,100].",
-  "Les intervalles de confiance sont de Wald-Student avec les ddl survey.",
-  "BH ne porte que sur les familles indiquées dans tests_globaux_et_BH.csv.",
-  "Autre est conservé dans les modèles principaux ; les modèles HF sont une annexe.",
-  "Vérifier les coefficients non identifiés, surtout les interactions tous sexes.",
-  "Une colonne vide / non estimée n'est pas un résultat nul.",
-  "Vérifier audit_libelles.csv, références et diagnostics avant interprétation."
-), file.path(dossier_sortie, "LIRE_LES_SORTIES.txt"), useBytes = FALSE)
-
-# Réattacher le plan à df pour permettre un nettoyage ultérieur sans le perdre.
-attr(df, "plan_redresse") <- plan_complet
-attr(df, "diagnostic_redressement") <- diagnostic_redressement
-
-cat("\nLes tables CSV et LaTeX sont dans :", dossier_sortie, "\n")
-cat("Vérifier en priorité diagnostic_modeles.csv et audit_libelles.csv.\n")
-# Pour ne conserver que df après consultation :
-# rm(list = setdiff(ls(all.names = TRUE), "df"))
-
+saveRDS(list(positions = positions, resultats = resultats, tableau_r2 = tableau_r2,
+             shapley = tableau_shapley, coefficients = coefficients, tests = tests,
+             robustesse = robustesse, nucleaire = list(parts = parts_nucleaire,
+             interaction_age = interaction_age, interaction_diplome = interaction_diplome),
+             offre_verte = offre_verte, offre_verte_logit = offre_verte_logit),
+        file.path(dossier, "resultats_regressions.rds"))

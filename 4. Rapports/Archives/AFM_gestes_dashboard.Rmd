@@ -1,0 +1,313 @@
+---
+title: "Représentations et pratiques énergétiques"
+subtitle: "Comparer les AFM, lire les variables et examiner une sélection thématique"
+lang: fr
+output:
+  html_document:
+    theme: flatly
+    self_contained: true
+    mathjax: null
+    toc: false
+params:
+  recalculer: true
+---
+
+```{r reconstruction, include=FALSE}
+racine <- normalizePath("..", mustWork = TRUE)
+if (isTRUE(params$recalculer)) {
+  statut <- system2(file.path(R.home("bin"), "Rscript"),
+    c("--vanilla", shQuote(file.path(racine, "4. Rapports/generer_dashboard_gestes.R")),
+      "--analyses", shQuote(racine)))
+  if (statut != 0L) stop("Échec du recalcul : consulter le journal R.")
+}
+```
+
+```{r preparation, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                     fig.width = 13, fig.height = 8, dpi = 130)
+library(ggplot2)
+source(file.path(racine, "2. Scripts/AFM_gestes_graphiques.R"), local = TRUE, encoding = "UTF-8")
+theme_set(theme_minimal(base_size = 12))
+sortie <- function(mode) file.path(racine, "3. Outputs", paste0("AFM_gestes_", mode))
+ai <- readRDS(file.path(sortie("illustratif"), "resultat_afm_gestes.rds"))
+ac <- readRDS(file.path(sortie("contributif"), "resultat_afm_gestes.rds"))
+pi <- readRDS(file.path(sortie("illustratif"), "graphiques.rds"))
+pc <- readRDS(file.path(sortie("contributif"), "graphiques.rds"))
+selection <- readRDS(file.path(sortie("contributif"), "selection", "resultats_selection.rds"))
+ps <- lapply(names(selection), function(nom) readRDS(file.path(sortie("contributif"),
+  "selection", nom, "graphiques.rds")))
+names(ps) <- names(selection)
+libelles <- c(reference = "Référence : représentations", illustratif = "Gestes illustratifs",
+  contributif = "Représentations + 9 gestes", service_public_pratiques = "Service public + 9 gestes",
+  electricite_quotidien_logement = "Service public + 5 gestes ciblés", pratiques_seules = "9 gestes seuls")
+modeles <- c(list(reference = ai$reference, illustratif = ai$afm, contributif = ac$afm),
+             lapply(selection, function(x) x$afm))
+bilan <- do.call(rbind, lapply(names(modeles), function(nom) {
+  r <- modeles[[nom]]; actifs <- setdiff(seq_along(r$call$group), r$call$num.group.sup)
+  spectre <- spectre_afm_gestes(r)
+  data.frame(variante = unname(libelles[nom]), n = nrow(r$ind$coord),
+    variables_actives = sum(r$call$group[actifs]), groupes_actifs = length(actifs),
+    axe_1_pct = unname(r$eig[1,2]), plan_12_pct = sum(r$eig[1:2,2]),
+    trois_axes_pct = sum(r$eig[1:3,2]), cinq_axes_pct = sum(r$eig[1:5,2]),
+    axes_pour_50_pct = which(spectre$cumul >= 50)[1],
+    axes_pour_80_pct = which(spectre$cumul >= 80)[1])
+}))
+inertie <- do.call(rbind, lapply(names(modeles), function(nom) {
+  spectre <- spectre_afm_gestes(modeles[[nom]])
+  data.frame(variante = unname(libelles[nom]), spectre)
+}))
+write.csv2(bilan, file.path(sortie("contributif"), "comparaison_dashboard_inertie.csv"), row.names = FALSE)
+write.csv2(inertie, file.path(sortie("contributif"), "comparaison_dashboard_spectres.csv"), row.names = FALSE)
+fmt <- function(x) format(round(x, 2), decimal.mark = ",", trim = TRUE)
+tableau <- function(x) {
+  x[vapply(x, is.numeric, logical(1))] <- lapply(x[vapply(x, is.numeric, logical(1))], round, 3)
+  DT::datatable(x, rownames = FALSE, filter = "top", extensions = "Buttons",
+    options = list(pageLength = 8, scrollX = TRUE, dom = "Bfrtip",
+      buttons = c("copy", "csv"), language = list(search = "Rechercher :",
+        info = "Lignes _START_ à _END_ sur _TOTAL_", zeroRecords = "Aucun résultat")), escape = TRUE)
+}
+lire <- function(mode, fichier) read.csv2(file.path(sortie(mode), fichier), check.names = FALSE)
+```
+
+<style>
+.main-container{max-width:1350px}.cards{display:flex;gap:16px;flex-wrap:wrap;margin:24px 0}
+.card{flex:1;min-width:200px;background:#edf3f7;padding:18px;border-top:4px solid #235e86;border-radius:6px}
+.card strong{display:block;font-size:28px;color:#235e86}.nav-tabs{margin-bottom:20px}
+.note{background:#fff5e6;padding:16px;border-left:4px solid #c0782b;margin:20px 0}
+</style>
+
+<div class="cards">
+<div class="card"><strong>`r nrow(ac$afm$ind$coord)`</strong>personnes dans l'AFM avec gestes actifs</div>
+<div class="card"><strong>`r fmt(sum(ai$reference$eig[1:2,2]))` %</strong>plan 1–2 : représentations</div>
+<div class="card"><strong>`r fmt(sum(ac$afm$eig[1:2,2]))` %</strong>plan 1–2 : représentations + gestes</div>
+<div class="card"><strong>`r fmt(sum(ac$afm$eig[1:5,2]))` %</strong>cinq axes : représentations + gestes</div>
+</div>
+
+Ce rapport compare **la référence à 11 variables**, les **neuf gestes illustratifs**,
+les **neuf gestes actifs** et **trois sélections définies par leur contenu**.
+Les figures présentent les plans 1–2 et 2–3 ; les tableaux donnent les cinq axes.
+Les échelles, les modalités et les individus ont des représentations distinctes.
+Les tables sont filtrables et exportables. Aucune nouvelle classification n'est calculée.
+
+<div class="note">Un pourcentage d'inertie plus élevé après sélection ne suffit pas à valider
+une meilleure AFM : retirer des variables change le tableau, son inertie totale et
+la question étudiée. Les variables illustratives ne peuvent pas augmenter l'inertie
+des premiers axes actifs. La sélection ci-dessous est exploratoire, sans optimisation
+automatique ni choix des variables selon les seuls résultats observés.</div>
+
+## Analyses {.tabset .tabset-pills}
+
+### Comparer l'inertie
+
+```{r bilan}
+tableau(bilan)
+```
+
+```{r cumul, fig.height=6}
+ggplot(inertie[inertie$axe <= 15, ], aes(axe, cumul, colour = variante)) +
+  geom_line(linewidth = .8) + geom_point(size = 1.4) +
+  geom_hline(yintercept = c(50,80), linetype = 2, colour = "grey65") +
+  scale_x_continuous(breaks = 1:15) +
+  labs(title = "Inertie cumulée : jusqu'à quinze axes", x = "Nombre d'axes",
+       y = "Inertie cumulée (%)", colour = "Variante") + theme(legend.position = "bottom")
+```
+
+```{r par-axe, fig.height=6}
+ggplot(inertie[inertie$axe <= 5, ], aes(factor(axe), pourcentage, fill = variante)) +
+  geom_col(position = "dodge") + labs(title = "Part d'inertie de chacun des cinq premiers axes",
+    x = "Axe", y = "Inertie (%)", fill = "Variante") + theme(legend.position = "bottom")
+```
+
+L'ajout des gestes actifs étend l'analyse à davantage de modalités et de thèmes.
+Une baisse de l'inertie sur le plan 1–2 peut donc traduire une structure plus
+multidimensionnelle. Lire aussi l'axe 3, le cumul à cinq axes, les contributions
+des groupes et la qualité de représentation des variables d'intérêt.
+Les seuils 50 % et 80 % décrivent la concentration ; ce ne sont pas des règles de validation.
+
+### Gestes illustratifs {.tabset}
+
+Les représentations construisent les axes ; les gestes et les propriétés sociales
+sont projetés ensuite. La projection conserve l'inertie de référence.
+
+#### Individus
+
+```{r i-individus}
+print(pi$individus_1_2)
+print(pi$individus_2_3)
+```
+
+#### Modalités actives et illustratives
+
+Rouge : modalités actives. Bleu : modalités illustratives. Les étiquettes sont
+sélectionnées pour la lisibilité ; toutes les modalités figurent dans les tableaux.
+
+```{r i-conjoint}
+print(pi$modalites_conjointes_1_2)
+print(pi$modalites_conjointes_2_3)
+```
+
+#### Échelles et associations
+
+Les flèches du cercle sont des corrélations ; on ne les superpose pas aux
+barycentres des modalités comme s'il s'agissait des mêmes coordonnées.
+η² et r² résument l'association de la variable entière avec l'axe, sur les réponses observées.
+
+```{r i-echelles, fig.height=9}
+print(pi$echelles_1_2)
+print(pi$associations_variables_1_2)
+print(pi$associations_variables_2_3)
+```
+
+#### Nuage et modalités
+
+```{r i-superposition}
+print(pi$individus_modalites_1_2)
+```
+
+#### Tables complètes
+
+```{r i-tables}
+tableau(lire("illustratif", "10_toutes_variables_axes.csv"))
+tableau(lire("illustratif", "03_frequences_gestes.csv"))
+```
+
+### Gestes contributifs {.tabset}
+
+Vingt variables actives en sept groupes : les quatre groupes historiques et
+trois groupes de pratiques. Les propriétés sociales restent illustratives.
+« Non concerné » et NSP sont des modalités explicites ; ils peuvent contribuer
+à des axes d'opportunités matérielles ou d'incertitude.
+
+#### Individus
+
+```{r c-individus}
+print(pc$individus_1_2)
+print(pc$individus_2_3)
+```
+
+#### Modalités actives et illustratives
+
+```{r c-conjoint}
+print(pc$modalites_conjointes_1_2)
+print(pc$modalites_conjointes_2_3)
+```
+
+#### Échelles et associations
+
+```{r c-echelles, fig.height=9}
+print(pc$echelles_1_2)
+print(pc$groupes_contributions)
+print(pc$associations_variables_1_2)
+print(pc$associations_variables_2_3)
+```
+
+#### Nuage et modalités
+
+```{r c-superposition}
+print(pc$individus_modalites_1_2)
+```
+
+#### Contributions et tables
+
+```{r c-tables}
+tableau(lire("contributif", "05_contributions_groupes.csv"))
+tableau(lire("contributif", "10_toutes_variables_axes.csv"))
+tableau(lire("contributif", "11_associations_toutes_variables.csv"))
+```
+
+### Sélection thématique {.tabset}
+
+Les trois scénarios utilisent les mêmes individus et poids que l'AFM complète
+avec gestes actifs. Les représentations déjà imputées sont conservées.
+Les variables retirées de l'actif deviennent illustratives : leur contenu reste
+visible. Aucun regroupement des réponses ni nouvelle imputation n'est effectué.
+
+#### Scénarios et bilan
+
+```{r selections}
+tableau(read.csv2(file.path(sortie("contributif"), "selection", "comparaison_selection.csv")))
+```
+
+**Service public + neuf gestes** : intérêt/connaissance, service public/gouvernance
+et toutes les pratiques restent actifs ; choix de transition et autoconsommation
+deviennent illustratifs. Cette variante garde un périmètre large de pratiques.
+
+**Service public + cinq gestes ciblés** : chaleur, suivi, petits équipements,
+remplacement et isolation. Mobilité, décalage horaire, recherche d'information
+et production deviennent illustratifs. Le choix recentre l'analyse sur les usages
+quotidiens et le logement ; il ne couvre plus toute la transition énergétique.
+
+**Neuf gestes seuls** : les pratiques construisent l'espace et toutes les
+représentations deviennent illustratives. Il s'agit d'une analyse des pratiques,
+pas d'une version directement équivalente de l'AFM des représentations.
+
+#### Service public et neuf gestes
+
+```{r s-large}
+print(ps$service_public_pratiques$individus_1_2)
+print(ps$service_public_pratiques$modalites_conjointes_1_2)
+print(ps$service_public_pratiques$echelles_1_2)
+print(ps$service_public_pratiques$groupes_contributions)
+print(ps$service_public_pratiques$associations_variables_1_2)
+```
+
+#### Service public et cinq gestes
+
+```{r s-cible}
+print(ps$electricite_quotidien_logement$individus_1_2)
+print(ps$electricite_quotidien_logement$modalites_conjointes_1_2)
+print(ps$electricite_quotidien_logement$echelles_1_2)
+print(ps$electricite_quotidien_logement$groupes_contributions)
+print(ps$electricite_quotidien_logement$associations_variables_1_2)
+```
+
+#### Pratiques seules
+
+```{r s-pratiques}
+print(ps$pratiques_seules$individus_1_2)
+print(ps$pratiques_seules$modalites_conjointes_1_2)
+print(ps$pratiques_seules$echelles_1_2)
+print(ps$pratiques_seules$groupes_contributions)
+print(ps$pratiques_seules$associations_variables_1_2)
+```
+
+### Méthode et limites
+
+Le score de connaissance va de 0 à 4 : RTE transporte, Enedis distribue, EDF et
+Engie produisent/fournissent. Chaque acteur correctement identifié vaut un point,
+NSP vaut zéro, une absence technique rend le score observé manquant.
+Les autres échelles actives proviennent d'un seul item chacune.
+
+Le script 5 impute les 11 variables historiques par FAMD régularisée à trois
+composantes ; les variantes conservent cette préparation. Les gestes ne sont pas
+imputés. L'origine long/court est conservée avant les filtres de redressement.
+Les poids sont ceux du panel complet, renormalisés, sans recalage propre aux longs.
+L'effectif de Kish de l'AFM contributive vaut **`r round(sum(ac$poids)^2/sum(ac$poids^2))`**.
+Les limites de sélection et de représentativité décrites dans les notes initiales
+restent applicables.
+
+Une variable rare peut produire une modalité éloignée ; le cos² décrit la qualité
+de représentation d'un point et la contribution son rôle dans la construction
+d'un axe. Pour les illustratives, lire les associations et les v-tests, pas une
+contribution active. Pour les actives, l'association aux axes est en partie
+construite par l'analyse elle-même. Les v-tests restent exploratoires.
+
+Une sélection utile doit conserver les dimensions nécessaires à la question de
+recherche. Avant de choisir une version définitive : vérifier les modalités qui
+dominent les axes, la place du service public et des pratiques, la qualité de
+représentation et la sensibilité aux regroupements. Une sélection guidée par le
+seul pourcentage d'inertie favoriserait mécaniquement un tableau plus restreint.
+L'optimisation automatique et la stabilité par bootstrap ne sont pas réalisées ici.
+
+Sources : [FactoMineR, MFA](https://search.r-project.org/CRAN/refmans/FactoMineR/html/MFA.html)
+et [R Markdown, rapport HTML](https://rmarkdown.rstudio.com/docs/reference/html_document.html).
+La documentation locale détaillée figure dans `AFM_gestes.md`. Les scripts,
+versions de packages et empreintes des sources sont enregistrés avec les sorties.
+
+```{r trace, include=FALSE}
+trace <- c(file.path(racine, "4. Rapports/AFM_gestes_dashboard.Rmd"),
+           file.path(racine, "4. Rapports/generer_dashboard_gestes.R"))
+write.csv2(data.frame(fichier = basename(trace), md5 = unname(tools::md5sum(trace))),
+  file.path(sortie("contributif"), "sources_dashboard.csv"), row.names = FALSE)
+writeLines(capture.output(sessionInfo()), file.path(sortie("contributif"), "sessionInfo_dashboard.txt"))
+```

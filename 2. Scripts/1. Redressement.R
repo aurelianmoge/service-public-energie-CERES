@@ -1,17 +1,36 @@
-# Version finale du redressement - avec seulement age*sexe*statut_co (après recodage par Antoine)
+# Redressement de l'échantillon : calage sur l'âge, le sexe et le type de commune
+#
+# On attribue à chaque répondant un poids, de sorte que l'échantillon (longs et
+# courts réunis) retrouve la structure de la population française de 18 ans et
+# plus, selon trois variables croisées :
+#   - l'âge en quatre tranches (18-34, 35-49, 50-64, 65 ans et plus) ;
+#   - le sexe (homme / femme) ;
+#   - le type de commune déclaré, en deux modalités (rural / urbain, zone2).
+#
+# La cible rurale est celle que recommande le script 4 : une cible "corrigée de
+# la perception", qui ne corrige que le vrai déséquilibre de l'échantillon et pas
+# la façon dont les gens décrivent leur lieu de vie.
+#
+# Le script ne laisse que df dans l'environnement, avec deux poids :
+#   - poids      : chaque répondant représente un nombre de Français (somme = 53,5 M) ;
+#   - poids_norm : le même, ramené à la taille de l'échantillon (moyenne = 1).
 
-rm(list=ls())
+rm(list = ls())
 
-# On importe les outputs du script 4 d'Antoine
+# On importe les données préparées par le script 4, qui source lui-même le
+# script 2 : df_long et df_court, avec l'âge et les variables de zone.
+# Le script 4 laisse aussi deux objets dont on se sert plus bas :
+#   - pop_densite     : la grille communale INSEE, avec la taille de chaque commune ;
+#   - controle_taille : la part des répondants de chaque taille de commune qui se
+#                       disent ruraux.
 source("2. Scripts/4. Variable zone.R")
 
+
 ###############################
-### Chargement des packages ### 
+### Chargement des packages ###
 ###############################
 
 library(tidyverse)
-library(questionr)
-library(openxlsx)
 library(survey)
 
 
@@ -19,305 +38,250 @@ library(survey)
 ### Importation des données ###
 ###############################
 
-# On concatenne le df long et le df long
-# Conserver l'origine avant tout filtrage : même sans identifiant Bilendi,
-# un questionnaire long/court reste identifiable sans ambiguïté.
-df <- dplyr::bind_rows(list(long = df_long, court = df_court),
-                       .id = "version_questionnaire")
+### Les données de l'enquête
 
-# Les variables qui comptent sont :
-# - zone2
-# - tranche_insee (âge en 18-19, 20-24...)
-# - G1Q00001 (le sexe)
+# On réunit les questionnaires longs et courts, en gardant leur origine.
+df <- bind_rows(list(long = df_long, court = df_court), .id = "version_questionnaire")
+nrow(df)  # 3284 répondants
 
-# Grille de densité 2025 (géographie au 01/01/2026) : une ligne par commune,
-# avec sa population municipale 2023 et son degré de densité (3 postes).
-pop_densite <- read.xlsx("1. Data/Public data/grille_densite_2026.xlsx",
-                         sheet = "Maille communale", startRow = 5) |>
-  select(CODGEO, PMUN23, LIBDENS) |>
-  mutate(PMUN23 = as.numeric(PMUN23)) |>
-  filter(!startsWith(CODGEO, "976"))  # on écarte Mayotte, comme dans le redressement
+### Les données INSEE
 
-# Population des 15 ans et plus (2022) par commune stratifiée par catégorie d'âge, sexe et statut d'emploi
-pop_insee <- read.csv("1. Data/Public data/TD_POP1B_2022.csv", sep=";")
-colnames(pop_insee)
-pop_insee <- pop_insee |> 
-  filter(AGED100 >= 18)
+# Population par commune, sexe et âge détaillé (recensement 2022).
+# Attention : le fichier contient deux niveaux géographiques, les communes (COM)
+# et les arrondissements de Paris, Lyon et Marseille (ARM). Garder les deux
+# compterait ces trois villes deux fois : on ne garde que les communes.
+# On écarte Mayotte, absente de la grille de densité.
+pop_insee <- read.csv("1. Data/Public data/TD_POP1B_2022.csv", sep = ";",
+                      colClasses = c(CODGEO = "character")) |>
+  filter(NIVGEO == "COM", AGED100 >= 18, !startsWith(CODGEO, "976"))
 
-# On fusionne les deux grilles INSEE
-pop_densite <- pop_densite |> 
-  left_join(pop_insee, by="CODGEO")
+sum(pop_insee$NB, na.rm = TRUE)  # 53 483 601 adultes
 
-# On crée les catégories d'âge
-pop_densite <- pop_densite |> 
-  mutate(AGE_large = case_when(
-    AGED100 < 35 ~ "18-34",
-    AGED100 >= 35 & AGED100 < 50 ~ "35-49",
-    AGED100 >= 50 & AGED100 < 65 ~ "50-64",
-    AGED100 >= 65 ~ "65+",
-    TRUE ~ NA))
+# Chaque commune du recensement doit se retrouver dans la grille de densité,
+# sinon sa population disparaîtrait de la cible sans message d'erreur.
+stopifnot(all(pop_insee$CODGEO %in% pop_densite$CODGEO))
 
-# De même dans le df
-df <- df |> 
-  mutate(AGE_large = case_when(
-    tranche_bilendi %in% c("18-24", "25-29", "30-34") ~ "18-34",
-    tranche_bilendi %in% c("35-39", "40-44", "45-49") ~ "35-49",
-    tranche_bilendi %in% c("50-54", "55-59", "60-64") ~ "50-64",
-    tranche_bilendi == "65+" ~ "65+"
-  ))
 
-# On crée une variable "zone2" comme dans le df recodé en script 2
-pop_densite <- pop_densite |> 
-  mutate(zone2 =
-           case_when(
-             LIBDENS == "Rural" ~ "Rural",
-             LIBDENS %in% c("Urbain dense", "Urbain intermédiaire") ~ "Urbain"
-           ))
+######################################
+### Construction de la cible INSEE ###
+######################################
 
-# On groupe par sexe, âge et type de commune et on calcule les effectifs croisés
-pop_densite_group <- pop_densite |> 
-  group_by(AGE_large, SEXE, zone2) |> 
-  summarise(pop_strat = sum(NB, na.rm=TRUE))
+# On reprend le raisonnement du script 4, mais par âge et par sexe, et sur les
+# 18 ans et plus (le script 4 travaillait sur la population totale).
+# Pour chaque taille de commune, on prend la population INSEE de chaque âge et de
+# chaque sexe, et on la répartit entre rural et urbain selon la part des
+# répondants de cette taille qui se disent ruraux.
+# Hypothèse : à taille de commune égale, les Français décrivent leur zone comme
+# nos enquêtés, quels que soient leur âge et leur sexe.
 
-# On convertit le sexe en facteur dans le df
-# MODIFICATION : conserver toutes les réponses déclarées, dont "Autre".
+controle_taille  # part rurale déclarée : 100 / 97.4 / 33.8 / 4.8 / 0.0
+
+pop_cible <- pop_insee |>
+  left_join(pop_densite |> select(CODGEO, taille_commune), by = "CODGEO") |>
+  left_join(controle_taille |> select(taille_commune, rural_declare), by = "taille_commune") |>
+  mutate(
+    AGE_large = cut(AGED100, c(18, 35, 50, 65, Inf),
+                    c("18-34", "35-49", "50-64", "65+"), right = FALSE),
+    SEXE      = if_else(SEXE == 1, "Homme", "Femme"),
+    Rural     = NB * rural_declare / 100,
+    Urbain    = NB - Rural
+  ) |>
+  pivot_longer(c(Rural, Urbain), names_to = "zone2", values_to = "pop") |>
+  group_by(AGE_large, SEXE, zone2) |>
+  summarise(pop = sum(pop, na.rm = TRUE), .groups = "drop")
+
+# On vérifie la part rurale de la cible
+pop_cible |>
+  group_by(zone2) |>
+  summarise(part = round(100 * sum(pop) / sum(pop_cible$pop), 1))
+# 35.8 % de ruraux, contre 35.9 % dans le script 4 (population totale)
+
+
+#########################################
+### Préparation des données d'enquête ###
+#########################################
+
+### L'âge
+
+# Mêmes tranches que dans la cible INSEE
+df <- df |>
+  mutate(AGE_large = cut(age, c(18, 35, 50, 65, Inf),
+                         c("18-34", "35-49", "50-64", "65+"), right = FALSE))
+
+### Le sexe
+
+# On garde toutes les réponses, y compris "Autre" et les non-réponses (10 personnes).
 df <- df |> mutate(SEXE = factor(G1Q00001))
-
-# On transforme le sexe en facteur (comme dans le df)
-pop_densite_group <- pop_densite_group |> 
-  mutate(SEXE = factor(
-    case_when(
-      SEXE == 1 ~ "Homme", 
-      SEXE == 2 ~ "Femme"
-    ),
-    levels = c("Homme", "Femme")
-  ))
-
-
-######################
-#### Redressement ####
-######################
-
-# Nettoyage préalable
-#--------------------
-
-# Exclusion sans imputation si l'âge ou la zone est inconnu.
-# "Autre" et les non-réponses sur le sexe sont conservés.
-n_avant_redressement <- nrow(df)
-
-# Sur le sexe
 table(df$SEXE, useNA = "ifany")
 
-# Sur le type de commune
-table(df$zone2)
-n_exclus_zone <- sum(is.na(df$zone2))
-df <- df |> filter(!is.na(zone2))
+### Le type de commune
 
-# Sur la catégorie d'âge 
-table(df$AGE_large)
-sum(is.na(df$AGE_large))
-n_exclus_age <- sum(is.na(df$AGE_large)) # après l'exclusion pour zone inconnue
-df <- df |> filter(!is.na(AGE_large))
-
-# On nettoie les niveaux non utilisés
-df <- droplevels(df)
-
-
-# Redressement en pratique
-#-------------------------
-
-# On crée un poids initial uniforme
-# Même poids pour tous, à l'échelle de la population.
-# Cela stabilise le calage exponentiel, sans changer les poids finaux attendus.
-df$poids_initial <- sum(pop_densite_group$pop_strat) / nrow(df)
-
-
-### On construit les tableaux avec les distributions marginales
-
-# Sur le type de commune
-tab_pop_croisee_typeco <- pop_densite_group |> 
-  group_by(zone2) |> 
-  summarise(Freq = sum(pop_strat, na.rm = TRUE))
-
-# Sur le sexe
-tab_pop_croisee_sexe <- pop_densite_group |> 
-  group_by(SEXE) |> 
-  summarise(Freq = sum(pop_strat, na.rm = TRUE))
-
-# Sur l'âge
-tab_pop_croisee_age <- pop_densite_group |> 
-  group_by(AGE_large) |> 
-  summarise(Freq = sum(pop_strat, na.rm = TRUE))
-
-
-## Puis avec les distributions jointes
-
-# On cale tout le monde sur âge x zone, sans imputer le sexe.
-# Parmi les réponses Homme/Femme, on cale leur proportion conditionnelle
-# sur celle de l'INSEE, dans chaque cellule âge x zone.
-
-pop_calage <- pop_densite_group |> filter(pop_strat > 0)
-stopifnot(
-  nrow(df) > 0,
-  !anyNA(pop_calage[c("AGE_large", "SEXE", "zone2", "pop_strat")]),
-  all(is.finite(pop_calage$pop_strat)),
-  all(pop_calage$SEXE %in% c("Homme", "Femme"))
-)
-
-pop_joint <- pop_calage |>
-  group_by(AGE_large, zone2) |>
-  summarise(
-    Freq = sum(pop_strat),
-    Freq_homme = sum(pop_strat[SEXE == "Homme"]),
-    .groups = "drop"
-  ) |>
-  mutate(
-    strate = paste(AGE_large, zone2, sep = " | "),
-    p_homme = Freq_homme / Freq
-  )
-stopifnot(all(pop_joint$p_homme > 0 & pop_joint$p_homme < 1))
-
+# Le script 4 laisse zone2 manquante dans trois cas : la zone n'est pas
+# renseignée, elle contredit la taille de commune (hameau "urbain", grande ville
+# "rurale"), ou le répondant se dit périurbain sans donner sa taille de commune.
+# Plutôt que d'exclure ces personnes de toutes les analyses, on leur attribue une
+# zone d'après leur taille de commune, avec la règle du script 4 : hameau et
+# village -> rural ; petite ville et au-delà -> urbain.
 df <- df |>
   mutate(
-    strate = factor(paste(AGE_large, zone2, sep = " | "),
-                    levels = pop_joint$strate),
-    SEXE_redress = factor(
-      case_when(
-        G1Q00001 == "Homme" ~ "Homme",
-        G1Q00001 == "Femme" ~ "Femme",
-        TRUE ~ NA_character_
-      ),
-      levels = c("Homme", "Femme")
-    )
+    zone2_attribuee = is.na(zone2) & !is.na(taille_commune),
+    zone2 = case_when(
+      !is.na(zone2)                              ~ as.character(zone2),
+      taille_commune %in% c("Hameau", "Village") ~ "Rural",
+      !is.na(taille_commune)                     ~ "Urbain"
+    ),
+    zone2 = factor(zone2, levels = c("Rural", "Urbain"))
   )
-stopifnot(!anyNA(df$strate))
-if (any(table(df$strate) == 0)) {
-  stop("Cellule âge x zone sans répondant : regrouper les catégories concernées ",
-       "dans df ET dans les données INSEE avant de relancer.")
-}
 
-tab_sexe <- table(df$strate, df$SEXE_redress)
-pop_joint$calage_sexe_possible <- tab_sexe[, "Homme"] > 0 &
-  tab_sexe[, "Femme"] > 0
-if (any(!pop_joint$calage_sexe_possible)) {
-  warning("Sexe non calé dans ces cellules, faute de H et F observés : ",
-          paste(pop_joint$strate[!pop_joint$calage_sexe_possible], collapse = ", "),
-          ". L'âge x zone y reste calé pour tout le monde.")
-}
+sum(df$zone2_attribuee)  # 69 zones attribuées
+sum(is.na(df$zone2))     # 19 répondants sans zone ni taille de commune
 
-# Pour Autre/NSP, toutes les variables de calage du sexe valent zéro :
-# leur poids ne dépend donc que de leur cellule âge x zone.
-# Pour H/F, la somme pondérée de (1[Homme] - proportion cible) doit valoir 0.
-noms_calage_sexe <- character()
-for (j in which(pop_joint$calage_sexe_possible)) {
-  nom <- paste0("sexe_centre_", j)
-  df[[nom]] <- ifelse(
-    df$strate == pop_joint$strate[j] & !is.na(df$SEXE_redress),
-    as.numeric(df$SEXE_redress == "Homme") - pop_joint$p_homme[j],
-    0
-  )
-  noms_calage_sexe <- c(noms_calage_sexe, nom)
-}
+### Les exclusions
 
-formule_calage <- reformulate(c("strate", noms_calage_sexe), intercept = FALSE)
-X_calage <- model.matrix(formule_calage, data = df)
-X_age_zone <- model.matrix(~ strate - 1, data = df)
-stopifnot(identical(colnames(X_calage)[seq_len(ncol(X_age_zone))],
-                    colnames(X_age_zone)))
-population_calage <- setNames(
-  c(pop_joint$Freq, rep(0, length(noms_calage_sexe))),
-  colnames(X_calage)
-)
-
-# On crée un objet de type "survey"
-df_design <- svydesign(
-  ids = ~1,
-  weights = ~poids_initial,
-  data = df
-)
-
-# Calage exponentiel positif avec les contraintes ci-dessus.
-# On garde le nom design_post pour faciliter la suite des analyses.
-design_post <- calibrate(
-  df_design,
-  formula = formule_calage,
-  population = population_calage,
-  calfun = "raking",
-  maxit = 100,
-  epsilon = 1e-7
-)
-
-# Vérifier le respect de TOUTES les contraintes, sans forcer une non-convergence.
-ecart_calage <- as.numeric(crossprod(X_calage, weights(design_post))) -
-  population_calage
-stopifnot(
-  all(is.finite(weights(design_post)) & weights(design_post) > 0),
-  all(abs(ecart_calage) <= 1e-6 * pmax(1, abs(population_calage)))
-)
-print(data.frame(cible = names(population_calage),
-                 total_cible = as.numeric(population_calage),
-                 ecart = as.numeric(ecart_calage)))
+# Sans âge ou sans zone, on ne peut pas placer le répondant dans une cellule de
+# calage : on l'exclut, sans imputer.
+n_avant <- nrow(df)
+df <- df |> filter(!is.na(AGE_large), !is.na(zone2))
+n_avant - nrow(df)  # 25 exclus (19 sans zone, 7 sans âge, dont 1 sans les deux)
+nrow(df)            # 3259 répondants redressés (contre 3192 avant l'attribution des zones)
 
 
-# Vérifications et description des poids
+####################
+### Redressement ###
+####################
+
+# Le principe
+#------------
+
+# On cale tout le monde sur les cellules âge x zone (8 cellules). Pour le sexe,
+# on ne veut pas inventer un sexe aux 10 personnes qui ont répondu "Autre" ou
+# "Ne sait pas". On cale donc seulement, dans chaque cellule âge x zone, la part
+# des hommes parmi les hommes et les femmes. Les 10 autres personnes reçoivent
+# simplement le poids moyen de leur cellule âge x zone.
+
+# Les effectifs cibles par cellule âge x zone, et la part des hommes dans chacune
+cellules <- pop_cible |>
+  group_by(AGE_large, zone2) |>
+  summarise(p_homme = sum(pop[SEXE == "Homme"]) / sum(pop),
+            pop     = sum(pop),
+            .groups = "drop") |>
+  mutate(strate = paste(AGE_large, zone2, sep = " | "))
+
+cellules
+
+df <- df |> mutate(strate = factor(paste(AGE_large, zone2, sep = " | "),
+                                   levels = cellules$strate))
+
+# Chaque cellule doit contenir des hommes et des femmes
+table(df$strate, df$SEXE)[, c("Homme", "Femme")]  # au moins 69 par case
+
+
+# La traduction en contraintes de calage
 #---------------------------------------
 
-# On regarde les poids extrêmes
-idx <- order(weights(design_post), decreasing = TRUE)[1:10]
-design_post$variables[idx, c(
-  "AGE_large",
-  "SEXE",
-  "zone2"
-)]
+# La fonction calibrate() cale des totaux. Pour caler une proportion, on crée
+# dans chaque cellule une variable qui vaut, pour un homme, 1 - p_homme, pour une
+# femme, - p_homme, et 0 pour tous les autres. Si la somme pondérée de cette
+# variable vaut 0, c'est que la part pondérée des hommes parmi les hommes et les
+# femmes de la cellule vaut exactement p_homme.
+homme_ou_femme <- df$SEXE %in% c("Homme", "Femme")
 
-# On regarde la distribution des poids
-w <- weights(design_post)
-summary(w)
+for (j in seq_len(nrow(cellules))) {
+  dans_cellule <- df$strate == cellules$strate[j] & homme_ou_femme
+  df[[paste0("calage_sexe_", j)]] <- ifelse(
+    dans_cellule, (df$SEXE == "Homme") - cellules$p_homme[j], 0
+  )
+}
 
-# On regarde les quantiles
-quantile(
-  w,
-  probs = c(0, .01, .05, .10, .25, .50, .75, .90, .95, .99, 1)
-) # de 10 314 à 24 651
+variables_sexe <- paste0("calage_sexe_", seq_len(nrow(cellules)))
+formule_calage <- reformulate(c("strate", variables_sexe), intercept = FALSE)
 
-# On calcule l'Effective Sample Size (ESS)
-ESS <- sum(w)^2 / sum(w^2)
-c(
-  n = length(w), # 3185 individus dans la base
-  ESS = ESS, # ESS = 3125
-  # (en termes de précision statistique, c'est "comme si" on avait 2985 individus, à cause de la variance des poids)
-  taux_ESS = ESS / length(w) # le taux est de 0,94
-)
+# Les totaux à atteindre : la population de chaque cellule âge x zone, puis 0
+# pour chacune des variables de sexe
+totaux_cibles <- c(cellules$pop, rep(0, length(variables_sexe)))
 
 
-# On injecte les poids dans le df
-#--------------------------------
+# Le calage en pratique
+#----------------------
 
-# On crée une variable avec les poids (l'ordre est le même)
-df$poids <- weights(design_post)
+# On part d'un poids uniforme, à l'échelle de la population française
+df$poids_initial <- sum(cellules$pop) / nrow(df)
 
-# On vérifie la structure de la variable
-summary(df$poids) # entre 10 264 et 24 530
-sum(df$poids) # on a un total de 53 483 601 d'individus (soit la population française des 18+)
+plan_initial <- svydesign(ids = ~1, weights = ~poids_initial, data = df)
 
-# On crée un poids normalisé
-df <- df |> 
-  mutate(poids_norm = poids * nrow(df) / sum(poids))
+# Calage exponentiel ("raking") : les poids restent toujours positifs
+plan_redresse <- calibrate(plan_initial,
+                           formula    = formule_calage,
+                           population = totaux_cibles,
+                           calfun     = "raking",
+                           maxit      = 100,
+                           epsilon    = 1e-7)
 
-# On vérifie la structure de la variable
-summary(df$poids_norm) # chaque individu représente entre 0.61 et 1.46 individu à présent
-sum(df$poids_norm) # on a bien un total de 3 192 individus maintenant
+# On vérifie que toutes les contraintes sont respectées
+X <- model.matrix(formule_calage, data = df)
+ecarts <- colSums(X * weights(plan_redresse)) - totaux_cibles
+max(abs(ecarts))  # quasi nul (de l'ordre de 1e-7)
+stopifnot(max(abs(ecarts)) < 1)
 
-design_post$variables <- df
-attr(df, "plan_redresse") <- design_post
-attr(df, "diagnostic_redressement") <- list(
-  n_avant = n_avant_redressement,
-  exclus_zone = n_exclus_zone,
-  exclus_age_apres_zone = n_exclus_age,
-  n_apres = nrow(df),
-  cellules = pop_joint,
-  contraintes = data.frame(cible = names(population_calage),
-                           total_cible = as.numeric(population_calage),
-                           ecart = as.numeric(ecart_calage))
-)
-rm(list = setdiff(ls(all.names = TRUE), "df"))
+
+##############################################
+### Vérifications et description des poids ###
+##############################################
+
+df$poids <- weights(plan_redresse)
+
+# La distribution des poids
+summary(df$poids)
+quantile(df$poids, c(0, .01, .05, .25, .50, .75, .95, .99, 1))  # de 10 945 à 28 285
+
+# On regarde qui reçoit les poids les plus forts : les jeunes hommes ruraux,
+# les moins nombreux de l'échantillon (69 répondants)
+df |>
+  arrange(desc(poids)) |>
+  select(AGE_large, SEXE, zone2, poids) |>
+  head(10)
+
+# Effective Sample Size (ESS) : la précision équivaut à celle d'un échantillon
+# non pondéré de cette taille, à cause de la dispersion des poids.
+ESS <- sum(df$poids)^2 / sum(df$poids^2)
+round(c(n = nrow(df), ESS = ESS, taux_ESS = ESS / nrow(df)), 2)  # ESS = 3090, soit 95 %
+
+# On vérifie que les marges sont retrouvées
+df |>
+  filter(SEXE %in% c("Homme", "Femme")) |>
+  group_by(AGE_large, zone2) |>
+  summarise(part_hommes = round(100 * sum(poids[SEXE == "Homme"]) / sum(poids), 1),
+            .groups = "drop") |>
+  mutate(cible = round(100 * cellules$p_homme, 1))
+
+df |>
+  group_by(zone2) |>
+  summarise(part_ponderee = round(100 * sum(poids) / sum(df$poids), 1),
+            part_brute    = round(100 * n() / nrow(df), 1))
+# Ruraux : 38.1 % bruts, 35.8 % pondérés
+
+
+# Le poids normalisé
+#-------------------
+
+df <- df |> mutate(poids_norm = poids * n() / sum(poids))
+summary(df$poids_norm)  # chaque répondant compte pour 0.67 à 1.72 répondant "moyen"
+
+
+# Une précision pour la suite
+#----------------------------
+
+# Les questionnaires longs ne représentent pas tous les adultes : ils sont posés
+# aux personnes qui ont un contrat d'électricité à leur nom. Les 18-34 ans y sont
+# donc moins nombreux (17.5 % des longs pondérés, contre 25 % de l'ensemble).
+# Ce n'est pas un défaut des poids : les longs forment une sous-population réelle,
+# qu'il faut nommer comme telle dans les analyses qui ne portent que sur eux.
+df |>
+  group_by(version_questionnaire, AGE_large) |>
+  summarise(poids = sum(poids_norm), .groups = "drop_last") |>
+  mutate(part = round(100 * poids / sum(poids), 1))
+
+
+# On ne garde que df, sans les variables techniques du calage
+df <- df |> select(-starts_with("calage_sexe_"), -poids_initial)
+rm(list = setdiff(ls(), "df"))
