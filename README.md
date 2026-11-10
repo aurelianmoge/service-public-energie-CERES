@@ -1,4 +1,5 @@
 Ce dépôt GitHub s'inscrit dans le cadre du projet de recherche sur "les évolutions du service public de l'énergie" en France, porté par le CERES sous la direction de Marc Fleurbaey et Noé Kabouche.
+<<<<<<< HEAD
 Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 3 000 individus) à propos de leur rapport au service public de l'électricité.
 
 ## Les données
@@ -45,3 +46,6 @@ Les anciens scripts sont dans `2. Scripts/Annexes` (dont le diagnostic géograph
 `3. Variable geographie.R`, et l'ancienne AFM avec sa CAH), les anciens rapports et dashboards dans
 `4. Rapports/Archives`, et les anciennes sorties dans `3. Outputs/Archives`. Ces scripts ne sont plus
 maintenus : leurs chemins ne fonctionnent plus depuis le dossier `Annexes`.
+=======
+Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 2 000 individus) à propos de leur rapport au service public de l'électricité.
+>>>>>>> 8d25b4bb1f34614713c1c19bbd31941855a04224
