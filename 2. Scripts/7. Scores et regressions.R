@@ -1,7 +1,7 @@
 # Indicateurs et régressions pondérées.
 #
 # On construit les indicateurs, on vérifie que ceux à plusieurs items tiennent
-# (leurs items doivent être corrélés), puis on les organise selon leur rôle
+# (leurs items doivent être corrélés), puis on les organise selon leur rôle :
 # 7 positions expliquées, 6 variables explicatives liées
 # chacune à une hypothèse, et des indicateurs secondaires seulement décrits. Les
 # régressions sont réparties en blocs A à F (voir la partie 4). Modèle principal :
@@ -116,8 +116,8 @@ df$vert <- echelle(df$G6Q00004)
 
 # Offre verte effectivement souscrite (G6Q00001, longs) et scepticisme envers les
 # offres vertes (G6Q00005_SQ006 "rien ne me convainc", longs ; le N/A de cet item
-# correspond aux NSP). Ajoutés le 11/10 pour tester H5 : la disposition à payer
-# ne devient un choix que si l'offre est jugée crédible.
+# correspond aux NSP). Ils servent à tester si la disposition à payer devient un
+# choix quand l'offre est jugée crédible.
 df$offre_verte <- ifelse(!df$long | est_nsp(df$G6Q00001), NA,
                          as.numeric(txt(df$G6Q00001) == "Oui"))
 df$scepticisme <- ifelse(df$long, coche(df$G6Q00005_SQ006), NA)
@@ -241,12 +241,23 @@ df$difficultes <- factor(ifelse(df$long, dif, "Jamais"),
 df$difficultes_np <- factor(ifelse(df$long, dif, "Non posée"),
                             levels = c("Jamais", "Rarement/parfois", "Souvent/toujours", "NSP", "Non posée"))
 
+# Activité principale (G1Q00004), utilisée seulement en variante (partie 4) :
+# salariés du privé (référence) et du public séparés ; "Autre" et NSP regroupés.
+act <- txt(df$G1Q00004)
+df$csp <- factor(ifelse(grepl("secteur privé", act), "Salarié privé",
+  ifelse(grepl("secteur public", act), "Salarié public",
+  ifelse(grepl("^Indépendant", act), "Indépendant",
+  ifelse(grepl("^Retraité", act), "Retraité",
+  ifelse(grepl("^Étudiant", act), "Étudiant",
+  ifelse(act == "Sans emploi", "Sans emploi", "Autre/NSP")))))),
+  levels = c("Salarié privé", "Salarié public", "Indépendant", "Retraité", "Étudiant", "Sans emploi", "Autre/NSP"))
+
 controles <- c("age", "sexe", "diplome", "revenu", "difficultes", "logement", "statut", "vague")
 controles_sans_logement <- c("age", "sexe", "diplome", "revenu", "difficultes_np", "vague")
 
 
 #############################################
-### 4. Régressions : le découpage du 22/10 ###
+### 4. Régressions par blocs ###
 #############################################
 
 # Les indicateurs ont trois rôles :
@@ -283,9 +294,9 @@ positions <- data.frame(
   long_seul = c(FALSE, FALSE, FALSE, FALSE, FALSE, TRUE, TRUE),
   stringsAsFactors = FALSE)
 
-# Plan de sondage sur un sous-échantillon : poids seuls. Le calage n'est pas repris
-# dans le plan, mais c'est sans conséquence : avec le plan post-stratifié, les
-# coefficients sont identiques et les écarts-types plus petits de 0,2 %.
+# Plan de sondage sur un sous-échantillon : poids seuls, sans reprendre le calage.
+# Avec le plan post-stratifié, les coefficients sont identiques et les
+# écarts-types plus petits de 0,2 %.
 plan <- function(d) svydesign(ids = ~1, weights = ~poids, data = droplevels(d))
 
 etoiles <- function(p) ifelse(p < .001, "***", ifelse(p < .01, "**", ifelse(p < .05, "*", "")))
@@ -324,7 +335,7 @@ estimer <- function(i) {
                       family = quasibinomial()),
     mco_sur9 = svyglm(update(fB, gestes_n ~ .), design = des),
     ologit   = svyolr(update(fB, as.formula(paste0("factor(", ind$brut, ") ~ ."))), design = des))
-  # H6 : tests de Wald par bloc de variables, sur A2
+  # Tests de Wald par bloc de variables, sur A2
   wald <- sapply(c("age", "diplome", "revenu", "difficultes", "sexe", "zone"), function(b)
     regTermTest(m$A2, as.formula(paste("~", b)))$p)
   list(ind = ind, n = nrow(d), m = m, rob = rob, wald = wald,
@@ -398,7 +409,7 @@ bloc_f <- lapply(seq_len(nrow(positions)), function(i) {
 ### Bloc D : la disposition à payer devient-elle un choix quand l'offre est crédible ? ###
 
 # Offre souscrite (en points) selon la disposition à payer, chez les sceptiques
-# et chez les autres. H5 attend une souscription plus faible chez les sceptiques.
+# et chez les autres. On attend une souscription plus faible chez les sceptiques.
 d <- df[df$long & complete.cases(df[c("offre_verte_pts", "vert", "scepticisme",
                                        controles, "zone")]), ]
 h5 <- svyglm(reformulate(c("vert * scepticisme", controles, "zone"), "offre_verte_pts"),
@@ -461,6 +472,23 @@ variante_transition <- t(sapply(seq_len(nrow(positions)), function(i) {
 rownames(variante_transition) <- positions$nom
 
 
+### Variante : la catégorie socioprofessionnelle ###
+
+# Bloc A2 avec l'activité principale en plus, sur le même échantillon.
+# L'activité reste hors des modèles principaux. Elle n'est significative pour
+# aucune position. Presque tous les 65 ans et plus sont retraités, donc l'effet
+# de l'âge se répartit entre deux coefficients. On calcule aussi leur somme, à
+# comparer au bloc A2.
+variante_csp <- lapply(seq_len(nrow(positions)), function(i) {
+  ind <- positions[i, ]
+  d <- df[if (ind$long_seul) df$long else TRUE, ]
+  d <- d[complete.cases(d[c(ind$var, controles, "zone", h4, "csp")]), ]
+  m <- svyglm(reformulate(c(controles, "csp", "zone"), ind$var), design = plan(d))
+  list(ind = ind, n = nrow(d), m = m, wald = regTermTest(m, ~csp)$p,
+       senior_retraite = svycontrast(m, c("age65+" = 1, "cspRetraité" = 1)))
+})
+
+
 ###################
 ### 5. Tableaux ###
 ###################
@@ -495,7 +523,7 @@ print(tabAB("A2", c("difficultesRarement/parfois", "difficultesSouvent/toujours"
 cat("\n=== Tests de Wald par bloc, A2 (p-valeurs) ===\n")
 wald <- t(sapply(res, `[[`, "wald")); rownames(wald) <- positions$nom
 print(round(wald, 4))
-cat("\n=== Bloc B (H4) ===\n")
+cat("\n=== Bloc B : connaissance du réseau et intérêt pour l'énergie ===\n")
 print(tabAB("B", c("conn_reseau", "interet_energie"), c("Réseau", "Intérêt énergie")))
 r2 <- function(m) { y <- m$y; p <- weights(m$survey.design); f <- fitted(m)
   1 - sum(p * (y - f)^2) / sum(p * (y - weighted.mean(y, p))^2) }
@@ -510,7 +538,7 @@ print(robustesse[robustesse$accord %in% c("principal seulement", "robuste seulem
 cat(sprintf("Tests multiples : %d coefficients clés, %d significatifs à 5 %%, %d après correction de Benjamini-Hochberg\n",
             nrow(robustesse), sum(robustesse$p_principal < .05), sum(robustesse$p_bh < .05)))
 
-cat("\n=== H7, deux versions : zone déclarée et taille de commune (réf. urbain / grande ville) ===\n")
+cat("\n=== Territoire, deux versions : zone déclarée et taille de commune (réf. urbain / grande ville) ===\n")
 for (i in seq_along(h7)) {
   cat("\n", positions$nom[i], "\n")
   cat("  zone, avec logement et statut  :", paste(names(h7[[i]]$zone_complet), h7[[i]]$zone_complet), "\n")
@@ -519,7 +547,7 @@ for (i in seq_along(h7)) {
   cat("  taille, sans logement ni statut:", paste(sub("taille", "", names(h7[[i]]$taille_sans_log)), h7[[i]]$taille_sans_log), "\n")
 }
 
-cat("\n=== Bloc C (H3) : positions selon les conceptions du service public ===\n")
+cat("\n=== Bloc C : positions selon les conceptions du service public ===\n")
 print(noquote(registres))
 
 cat("\n=== Bloc F : B et C réunis ===\n")
@@ -528,7 +556,7 @@ dimnames(out) <- list(positions$nom, c("Organisme", "Mission", "Sans profit", "R
 print(noquote(cbind(n = sapply(bloc_f, `[[`, "n"), out,
                     R2_F = sprintf("%.3f", sapply(bloc_f, function(b) r2(b$m))), R2_B = sprintf("%.3f", r2_tab[, "B"]))))
 
-cat("\n=== Bloc D (H5) : offre souscrite (pts) ~ disposition à payer x scepticisme ===\n")
+cat("\n=== Bloc D : offre souscrite (pts) ~ disposition à payer x scepticisme ===\n")
 print(round(summary(h5)$coefficients[c("vert", "scepticisme", "vert:scepticisme"), ], 3))
 cat("Logit :\n")
 print(round(summary(h5_logit)$coefficients[c("vert", "scepticisme", "vert:scepticisme"), ], 3))
@@ -545,6 +573,15 @@ print(noquote(sapply(conn_rob, function(m) sapply(c("age50-64", "age65+", "sexeF
 cat("\n=== Variante : bloc B avec l'intérêt pour la transition en plus ===\n")
 print(noquote(variante_transition))
 
+cat("\n=== Variante : bloc A2 avec la catégorie socioprofessionnelle (réf. salarié du privé) ===\n")
+lv_csp <- levels(df$csp)[-1]
+out <- t(sapply(variante_csp, function(v) sapply(paste0("csp", lv_csp), function(t) coef_txt(v$m, t, dec_de(v$ind$nom)))))
+dimnames(out) <- list(positions$nom, lv_csp)
+print(noquote(cbind(n = sapply(variante_csp, `[[`, "n"), out,
+                    Wald_p = sprintf("%.3f", sapply(variante_csp, `[[`, "wald")),
+                    `65+ et retraité` = sprintf("%.2f", sapply(variante_csp, function(v) coef(v$senior_retraite))))))
+cat(sprintf("Part de retraités chez les 65 ans et plus : %.1f %%\n", 100 * pond(df$csp == "Retraité", df$age == "65+")))
+
 # Sauvegarde : coefficients de tous les modèles
 une_table <- function(m, bloc, variable, n) {
   s <- summary(m)$coefficients
@@ -557,9 +594,11 @@ coefs <- rbind(
   do.call(rbind, lapply(names(bloc_c), function(y) une_table(bloc_c[[y]], "C", y, length(bloc_c[[y]]$y)))),
   une_table(h5, "D", "Offre verte souscrite (pts)", length(h5$y)),
   do.call(rbind, lapply(bloc_e, function(b) une_table(b$m, "E", b$ind$nom, b$n))),
-  do.call(rbind, lapply(bloc_f, function(b) une_table(b$m, "F", b$ind$nom, b$n))))
+  do.call(rbind, lapply(bloc_f, function(b) une_table(b$m, "F", b$ind$nom, b$n))),
+  do.call(rbind, lapply(variante_csp, function(v) une_table(v$m, "A2 + CSP", v$ind$nom, v$n))))
 write.csv2(coefs, file.path(dossier_sortie, "coefficients.csv"), row.names = FALSE, fileEncoding = "UTF-8")
 saveRDS(list(res = res, h7 = h7, bloc_c = bloc_c, h5 = h5, h5_logit = h5_logit, bloc_e = bloc_e, bloc_f = bloc_f,
              conn_rob = conn_rob, robustesse = robustesse, variante_transition = variante_transition,
+             variante_csp = variante_csp,
              coherence = coherence, resume = resume),
         file.path(dossier_sortie, "resultats.rds"))
