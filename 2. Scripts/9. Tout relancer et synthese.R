@@ -1,19 +1,3 @@
-# Relancer toute l'analyse et produire la synthèse des résultats
-#
-# Ce script ne fait aucun calcul lui-même : il lance les scripts dans l'ordre,
-# puis tricote la synthèse (4. Rapports/Synthese_resultats.Rmd). Il suffit donc
-# de le lancer pour tout reproduire à partir des données brutes de "1. Data".
-#
-# Chaque script tourne dans son propre environnement, comme s'il était lancé
-# seul : aucun objet ne passe d'un script à l'autre, tout passe par les
-# fichiers enregistrés dans "3. Outputs".
-#
-# Le script 7 (Antoine) n'est pas relancé : il est indépendant et la synthèse
-# n'utilise pas ses sorties. Les scripts 1, 2 et 4 sont lancés par le script 3.
-#
-# À lancer depuis la racine du projet (ouvrir le .Rproj dans RStudio). Compter
-# deux à trois minutes.
-
 
 #################################
 ### Les scripts, dans l'ordre ###
