@@ -540,8 +540,8 @@ table(df$G7Q00001_SQ008, df$geste_isolation, useNA = "ifany")
 
 # Deux indicateurs synthétiques, définis comme dans le script 7 :
 #   - gestes_faits : le nombre de gestes déjà faits, sur 9 (pour la robustesse) ;
-#   - gestes_part  : la part des gestes faits parmi ceux qui concernent le
-#     répondant, c'est-à-dire tous sauf les "non concerné". Un locataire n'est
+#   - gestes_part  : la part des gestes faits parmi ceux pour lesquels le
+#     répondant ne s'est pas dit "non concerné". Un locataire n'est
 #     pas pénalisé pour l'isolation ; un "ne sait pas" compte comme non fait.
 fait     <- sapply(gestes, function(g) df[[g]] == "Fait")
 concerne <- sapply(gestes, function(g) df[[g]] != "Non concerné")

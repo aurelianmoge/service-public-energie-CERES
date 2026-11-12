@@ -18,7 +18,7 @@
 #
 # Les variables et leurs conventions sont celles du script 7 (Antoine) : mêmes
 # positions (pro-nucléaire de 0 à 100 comme mesure principale du nucléaire,
-# part des gestes parmi ceux qui concernent le répondant), mêmes contrôles
+# part des gestes faits hors "non concerné"), mêmes contrôles
 # (zone à trois modalités, logement, statut, difficultés), même rapport à
 # l'énergie (connaissance du réseau et intérêt pour l'énergie), mêmes
 # robustesses. Ce script y ajoute les modèles emboîtés, la décomposition du R²

@@ -10,13 +10,21 @@ output:
 ---
 
 ```{r preparation, include=FALSE}
-# Synthèse des résultats des analyses factorielles (scripts 5a à 5e) et des
-# régressions (script 6).
+# Synthèse des résultats, pour la présentation aux chercheurs.
 #
-# Ce document ne refait aucun calcul : il relit les sorties enregistrées dans
-# "3. Outputs". Il faut donc avoir lancé les scripts 3, 5a à 5e et 6 avant de
-# le tricoter (bouton Knit de RStudio). Les chiffres du texte sont insérés
-# depuis ces sorties : ils se mettent à jour à chaque nouveau rendu.
+# Le document avance des résultats les plus attendus aux plus inédits :
+#   1. le paysage des opinions (descriptif) ;
+#   2. ce que le profil social explique (script 6) ;
+#   3. la structure de chaque bloc et les typologies (scripts 5a à 5d, 5g) ;
+#   4. les hypothèses testées, confirmées ou non (scripts 6 et 8) ;
+#   5. des blocs qui ne se répondent pas (scripts 5e, 5f, 5g) ;
+#   6. le nucléaire et le genre (scripts 6 et 8).
+#
+# Le document ne refait aucune analyse : il relit les sorties enregistrées dans
+# "3. Outputs" (seules les parts du paysage, partie 1, sont calculées ici). Il
+# faut donc avoir lancé les scripts 3, 5a à 5g, 6 et 8 avant de le tricoter
+# (bouton Knit de RStudio). Les chiffres du texte se mettent à jour à chaque
+# rendu.
 
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
                       fig.width = 9, fig.height = 4.5, dpi = 150, fig.align = "center")
@@ -35,18 +43,27 @@ lire <- function(...) read_csv2(file.path(...), show_col_types = FALSE)
 
 nombre <- function(x, k = 0) sub("^-", "−", formatC(x, format = "f", digits = k, big.mark = " ", decimal.mark = ","))
 pct <- function(x, k = 0) paste0(nombre(x, k), " %")
+valeur_p <- function(p) if_else(p < 0.001, "< 0,001", nombre(p, 3))
 
-bleu  <- "#235E86"
-rouge <- "#B34E3F"
-couleurs_blocs <- c("Âge" = "#235E86", "Sexe" = "#B34E3F", "Diplôme" = "#D9A441",
-                    "Revenu" = "#5B8E7D", "Conditions de vie" = "#7A6C9E",
-                    "Rapport à l'énergie" = "#8C8C8C", "Conception du SP" = "#C77C4E")
+bleu   <- "#235E86"
+rouge  <- "#B34E3F"
+ocre   <- "#D9A441"
+vert   <- "#5B8E7D"
+violet <- "#7A6C9E"
+couleurs_blocs <- c("Âge" = bleu, "Sexe" = rouge, "Diplôme" = ocre, "Revenu" = vert,
+                    "Conditions de vie" = violet, "Rapport à l'énergie" = "#8C8C8C",
+                    "Conception du SP" = "#C77C4E")
 
 theme_set(theme_minimal(base_size = 12) +
             theme(panel.grid.minor = element_blank(),
                   panel.grid.major.y = element_blank(),
                   plot.background = element_rect(fill = "white", colour = NA),
                   legend.position = "top", legend.title = element_blank()))
+
+# L'ordre naturel des modalités sur les figures
+ordre_affichage <- c("18-34", "35-49", "50-64", "65+",
+                     "< 1 000", "1 000-1 500", "1 500-2 500", "2 500-4 000", "4 000 et +",
+                     "Organisme public", "Les deux", "Mission d'intérêt général")
 ```
 
 ```{r importation, include=FALSE}
@@ -56,9 +73,31 @@ df <- readRDS(file.path(sorties, "df_recode.rds"))
 taille_effective <- sum(df$poids)^2 / sum(df$poids^2)
 part_rural <- 100 * weighted.mean(df$zone2 == "Rural", df$poids, na.rm = TRUE)
 
+### 1. Le paysage : quelques parts pondérées
+
+part <- function(x, garder = TRUE) 100 * weighted.mean(x[garder], df$poids_norm[garder], na.rm = TRUE)
+paysage <- tribble(
+  ~theme,                 ~libelle,                                             ~valeur,
+  "Service public",       "L'État doit garantir l'accès à l'énergie",           part(df$garant_etat),
+  "Service public",       "Même prix et même service partout",                  part(df$solidarite),
+  "Service public",       "Favorable à la concurrence (4 ou 5 sur 5)",          part(df$concurrence >= 4),
+  "Service public",       "Favorable à une gestion décentralisée (4 ou 5)",     part(df$local >= 4),
+  "Service public",       "Le service public, c'est l'absence de profit",       part(df$sp_sans_profit),
+  "Transition",           "Le nucléaire en première production",                part(df$nucleaire_premier),
+  "Transition",           "Bonus aux renouvelables acceptable",                 part(df$mesure_bonus),
+  "Transition",           "Investissement public acceptable",                   part(df$mesure_invest_public),
+  "Transition",           "Régulation acceptable",                              part(df$mesure_regulation),
+  "Transition",           "Malus sur les fossiles acceptable",                  part(df$mesure_malus),
+  "Connaissance",         "Connaît le rôle de RTE et d'Enedis",                 part(df$conn_reseau == 2),
+  "Connaissance",         "Ne connaît ni l'un ni l'autre",                      part(df$conn_reseau == 0),
+  "Pratiques (longs)",    "Part des gestes faits (hors « non concerné »)",    part(df$gestes_part, df$long),
+  "Pratiques (longs)",    "A souscrit une offre verte",                         part(df$offre_verte, df$long),
+  "Pratiques (longs)",    "Sceptique envers les offres vertes",                 part(df$sceptique, df$long),
+  "Pratiques (longs)",    "Prêt à payer plus pour le vert (4 ou 5 sur 5)",      part(df$payer_vert >= 4, df$long)
+)
+
 ### Les axes des analyses factorielles
 
-# On décrit chaque axe retenu par ses deux pôles (lecture des scripts 5a à 5d)
 blocs <- tribble(
   ~bloc,                   ~dossier,
   "Service public",        "1. Service public",
@@ -84,15 +123,12 @@ libelles_sociaux <- c(sexe = "Sexe", age = "Âge", diplome = "Diplôme", revenu 
                       statut = "Statut d'occupation", connaissance = "Connaissance du réseau",
                       interet = "Intérêt pour l'énergie")
 
-# L'inertie de chaque axe : taux modifiés de Benzécri pour les ACM, inertie
-# brute pour l'ACP
 inertie <- map2_dfr(blocs$bloc, blocs$dossier, function(b, d) {
   i <- lire(af, d, "01_inertie.csv")
   tibble(bloc = b, axe = i$axe,
          inertie = if ("taux_benzecri" %in% names(i)) i$taux_benzecri else i$inertie)
 })
 
-# Les eta² des variables illustratives, en format long
 eta2 <- map2_dfr(blocs$bloc, blocs$dossier, function(b, d) {
   lire(af, d, "03_eta2_illustratives.csv") |>
     pivot_longer(-variable, names_to = "axe", values_to = "eta2") |>
@@ -106,7 +142,7 @@ axes <- poles |>
   left_join(eta2 |> group_by(bloc, axe) |> slice_max(eta2, n = 1, with_ties = FALSE),
             by = c("bloc", "axe"))
 
-### Les AFM combinées
+### Les AFM combinées et la cohérence
 
 rv <- bind_rows(
   lire(af, "5. AFM combinées", "A_01_coefficients_RV.csv") |> mutate(afm = "A"),
@@ -115,25 +151,38 @@ rv <- bind_rows(
   pivot_longer(-c(groupe, afm), names_to = "groupe2", values_to = "rv") |>
   filter(!is.na(rv), groupe != "MFA", groupe2 != "MFA", groupe < groupe2)
 
-# Les corrélations entre axes de blocs différents. On écarte les couples liés
-# par construction : "payer plus pour le vert" est une variable active du bloc
-# marché.
-noms_axes <- c(sp_axe1 = "SP : pôle marché", tr_axe1 = "Transition : renouvelables",
-               gestes_axe1 = "Gestes : refus", gestes_axe2 = "Gestes : non concerné",
-               gestes_axe3 = "Gestes : prêt plutôt que fait", marche_axe1 = "Marché : entrée",
-               connaissance_reseau = "Connaissance du réseau",
-               interet_energie = "Intérêt pour l'énergie", payer_vert = "Payer plus pour le vert")
-famille <- function(v) if_else(str_detect(v, "_axe"), str_remove(v, "_axe\\d"), v)
+coherence <- readRDS(file.path(af, "6. Cohérence entre blocs", "coherence.rds"))
+coh <- coherence$coherence
+coh_groupe <- function(v, g, type) {
+  coherence$par_groupe$coherence[coherence$par_groupe$variable == v &
+                                   coherence$par_groupe$groupe == g & coherence$par_groupe$type == type]
+}
 
-correlations <- lire(af, "5. AFM combinées", "C_correlations_axes.csv") |>
-  pivot_longer(-axe, names_to = "axe2", values_to = "r") |>
-  filter(axe %in% names(noms_axes), axe2 %in% names(noms_axes), axe < axe2,
-         famille(axe) != famille(axe2),
-         !(axe == "marche_axe1" & axe2 == "payer_vert")) |>
-  mutate(couple = paste(noms_axes[axe], "×", noms_axes[axe2])) |>
-  arrange(desc(abs(r)))
+### Les typologies
 
-### Les régressions
+typo <- readRDS(file.path(af, "7. Typologies", "typologies.rds"))
+classes <- readRDS(file.path(af, "7. Typologies", "classes.rds"))
+taille_classes <- bind_rows(
+  df |> mutate(classe = classes$classe_sp) |> count(classe, wt = poids_norm) |>
+    mutate(typologie = "sp", pct = 100 * n / sum(n)),
+  df |> mutate(classe = classes$classe_gestes) |> filter(!is.na(classe)) |>
+    count(classe, wt = poids_norm) |> mutate(typologie = "gestes", pct = 100 * n / sum(n))
+)
+taille <- function(k) taille_classes$pct[taille_classes$classe == k]
+v_social <- function(t, v) typo$liens_sociaux$v_cramer[typo$liens_sociaux$typologie == t & typo$liens_sociaux$variable == v]
+tableau_croise <- prop.table(typo$croisement)
+attendu <- outer(rowSums(tableau_croise), colSums(tableau_croise))
+v_croisement <- sqrt(sum((tableau_croise - attendu)^2 / attendu) / (min(dim(tableau_croise)) - 1))
+position_classe <- function(t, p, k) {
+  x <- typo$positions_classes
+  x$moyenne[x$typologie == t & x$position == p & x$classe == k]
+}
+p_position <- function(t, p) {
+  x <- typo$positions_classes
+  x$p_classes[x$typologie == t & x$position == p][1]
+}
+
+### Les régressions (script 6)
 
 reg <- readRDS(file.path(sorties, "Régressions", "resultats_regressions.rds"))
 r2 <- reg$tableau_r2 |> left_join(select(reg$positions, variable, longs_seuls), by = "variable")
@@ -142,7 +191,7 @@ nucleaire <- c("pro_nucleaire_pts", "axe_nucleaire")
 
 r2_nucleaire <- r2$R2_M4[r2$variable == "pro_nucleaire_pts"]
 r2_max_opinions <- max(r2$R2_M4[!r2$variable %in% c(pratiques, nucleaire)])
-part_sexe <- reg$shapley$part[reg$shapley$variable == "pro_nucleaire_pts" & reg$shapley$bloc == "Sexe"]
+shapley <- function(v, b) reg$shapley$part[reg$shapley$variable == v & reg$shapley$bloc == b]
 
 significatifs <- reg$tests |> group_by(bloc) |> summarise(n = sum(p_BH < 0.05))
 n_significatif <- function(b) significatifs$n[significatifs$bloc == b]
@@ -150,54 +199,73 @@ n_significatif <- function(b) significatifs$n[significatifs$bloc == b]
 desaccords <- sum(reg$robustesse$accord %in% c("principal seulement", "robuste seulement"))
 inversions <- sum(reg$robustesse$accord == "signes opposés")
 
-# Le score pro-nucléaire (0 à 100) et la part plaçant le nucléaire en première
-# production, par sexe et âge
 nucleaire_sexe_age <- lire(sorties, "Régressions", "07_nucleaire_sexe_age.csv")
 valeur_nucleaire <- function(colonne, s, a) nucleaire_sexe_age[[colonne]][nucleaire_sexe_age$sexe == s & nucleaire_sexe_age$AGE_large == a]
 score <- function(s, a) valeur_nucleaire("pro_nucleaire_pts", s, a)
 premier <- function(s, a) valeur_nucleaire("nucleaire_premier_pts", s, a)
 
-# L'écart femmes - hommes par âge, tiré du modèle avec interaction (les 35-49
-# ans sont la référence)
-coefs <- coef(reg$nucleaire$interaction_age)
-ecart_age <- tibble(
-  age = factor(c("18-34", "35-49", "50-64", "65+")),
-  ecart = coefs[["sexeFemme"]] + c(coefs[["age_tranche18-34:sexeFemme"]], 0,
-                                   coefs[["age_tranche50-64:sexeFemme"]], coefs[["age_tranche65+:sexeFemme"]])
-)
-ecart_bac5 <- coef(reg$nucleaire$interaction_diplome)[["sexeFemme:diplomeBac+5"]]
-p_age     <- survey::regTermTest(reg$nucleaire$interaction_age, ~ sexe:age_tranche)$p
-p_diplome <- survey::regTermTest(reg$nucleaire$interaction_diplome, ~ sexe:diplome)$p
-
 offre <- summary(reg$offre_verte)$coefficients
+
+### Les prolongements (script 8)
+
+prol <- readRDS(file.path(sorties, "Régressions", "Prolongements", "resultats_prolongements.rds"))
+tests_inter <- prol$tests_interaction
+p_inter    <- function(k) tests_inter$p[tests_inter$code == k]
+p_inter_bh <- function(k) tests_inter$p_BH[tests_inter$code == k]
+predite <- function(k, x, g) prol$predites$estimation[prol$predites$code == k & prol$predites$x == x & prol$predites$groupe == g]
+ecart <- function(k, x) prol$ecarts$ecart[prol$ecarts$code == k & prol$ecarts$x == x][1]
+gelbach <- function(pos, terme) prol$decomposition$estimation[prol$decomposition$position == pos & prol$decomposition$terme == terme]
+gelbach_ic <- function(pos, terme, borne) prol$decomposition[[borne]][prol$decomposition$position == pos & prol$decomposition$terme == terme]
+ecart_base  <- gelbach("pro_nucleaire_pts", "Écart à profil égal")
+ecart_reste <- gelbach("pro_nucleaire_pts", "Écart restant")
+gestes_ame <- prol$gestes_comparaison
+```
+
+```{r graphique-interaction, include=FALSE}
+# Une figure de valeurs prédites pour chacune des cinq interactions du script 8
+graphique_interaction <- function(k, etiquette_groupe = identity, axe_y = NULL) {
+  prol$predites |>
+    filter(code == k) |>
+    mutate(x = factor(x, levels = c(intersect(ordre_affichage, unique(x)), setdiff(unique(x), ordre_affichage))),
+           groupe = factor(etiquette_groupe(groupe), levels = unique(etiquette_groupe(groupe)))) |>
+    ggplot(aes(x, estimation, colour = groupe, group = groupe)) +
+    geom_line(position = position_dodge(width = 0.3), alpha = 0.5) +
+    geom_pointrange(aes(ymin = ic_bas, ymax = ic_haut), position = position_dodge(width = 0.3)) +
+    scale_colour_manual(values = c(bleu, rouge, ocre, vert, violet)) +
+    labs(x = NULL, y = axe_y)
+}
 ```
 
 ```{=html}
 <style>
-  :root { --fond: #fbfbf9; --texte: #1d2430; --discret: #5d6675; --ligne: #dfe2e6; --carte: #ffffff; --accent: #235E86; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --fond: #15191f; --texte: #e6e8eb; --discret: #a3abb7; --ligne: #2c333d; --carte: #1d232b; --accent: #7fb3d9; color-scheme: dark; } }
-  :root[data-theme="dark"] { --fond: #15191f; --texte: #e6e8eb; --discret: #a3abb7; --ligne: #2c333d; --carte: #1d232b; --accent: #7fb3d9; color-scheme: dark; }
+  :root { --fond: #fbfbf9; --texte: #1d2430; --discret: #5d6675; --ligne: #dfe2e6; --carte: #ffffff; --accent: #235E86; --encart: #eef3f7; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --fond: #15191f; --texte: #e6e8eb; --discret: #a3abb7; --ligne: #2c333d; --carte: #1d232b; --accent: #7fb3d9; --encart: #1c2a36; color-scheme: dark; } }
+  :root[data-theme="dark"] { --fond: #15191f; --texte: #e6e8eb; --discret: #a3abb7; --ligne: #2c333d; --carte: #1d232b; --accent: #7fb3d9; --encart: #1c2a36; color-scheme: dark; }
   body { background: var(--fond); color: var(--texte); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; }
   .main-container, .synthese { max-width: 980px; margin: 0 auto; padding-block: 24px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
   h1.title { display: none; }
   h1, h2, h3 { font-family: "Source Serif 4", Georgia, serif; font-weight: 600; line-height: 1.25; text-wrap: balance; }
   h1 { font-size: 2rem; margin: 0 0 .4em; }
-  h2 { font-size: 1.45rem; margin: 2.2em 0 .6em; padding-top: .8em; border-top: 1px solid var(--ligne); }
-  h3 { font-size: 1.1rem; margin: 1.6em 0 .4em; }
+  h2 { font-size: 1.45rem; margin: 2.4em 0 .6em; padding-top: .8em; border-top: 1px solid var(--ligne); }
+  h3 { font-size: 1.1rem; margin: 1.8em 0 .4em; }
   p, li { max-width: 72ch; }
   .chapeau { font-size: 1.08rem; }
   .surtitre { text-transform: uppercase; letter-spacing: .06em; font-size: .8rem; color: var(--discret); margin: 0; }
   .note, .caption { color: var(--discret); font-size: .88rem; }
+  .message { background: var(--encart); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 16px; margin: 1em 0 1.4em; max-width: 72ch; }
+  .message p { margin: 0; }
   .chiffres { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 1.4em 0; }
   .chiffre { background: var(--carte); border: 1px solid var(--ligne); border-radius: 8px; padding: 12px 16px; }
   .chiffre b { display: block; font-family: "Source Serif 4", Georgia, serif; font-size: 1.7rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
   .chiffre span { color: var(--discret); font-size: .88rem; line-height: 1.35; display: block; }
+  ol.plan { padding-left: 1.3em; }
+  ol.plan li { margin: .2em 0; }
+  ol.plan a { color: var(--accent); }
   img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--ligne); background: #fff; }
   .tableau { overflow-x: auto; margin: 1em 0; }
   table { border-collapse: collapse; width: 100%; font-size: .9rem; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--ligne); vertical-align: top; }
-  th { color: var(--discret); font-weight: 600; white-space: nowrap; }
-  td:nth-child(n+3) { white-space: normal; }
+  th { color: var(--discret); font-weight: 600; }
   details { margin-top: 2em; }
   summary { cursor: pointer; font-weight: 600; }
 </style>
@@ -209,7 +277,7 @@ offre <- summary(reg$offre_verte)$coefficients
 
 # Ce que pensent les Français du service public de l'électricité
 
-<p class="chapeau">Les opinions se rangent en blocs presque indépendants : la gouvernance du service public, le mix énergétique, les gestes et le rapport au marché ne forment pas une vision unifiée (corrélation entre blocs au plus `r nombre(max(abs(correlations$r)), 2)`). Le profil social explique peu chaque opinion, sauf le choix du nucléaire : R² de `r nombre(r2_nucleaire, 2)`, contre `r nombre(r2_max_opinions, 3)` au plus pour les autres. Le sexe en porte `r pct(part_sexe)` du R² expliqué.</p>
+<p class="chapeau">Une large majorité attend de l'État qu'il garantisse l'accès à l'électricité et le même service partout. Mais ces opinions sur le service public ne sont ni rattachées au profil social, ni reliées aux choix de transition : elles forment un domaine à part. La seule opinion fortement structurée est le nucléaire, et elle l'est d'abord par le sexe, sans que l'écart de connaissance du système l'explique.</p>
 
 <div class="chiffres">
 <div class="chiffre"><b>`r nombre(nrow(df))`</b><span>répondants redressés (âge × sexe × zone)</span></div>
@@ -218,86 +286,44 @@ offre <- summary(reg$offre_verte)$coefficients
 <div class="chiffre"><b>`r pct(part_rural, 1)`</b><span>de ruraux, cible corrigée de la perception</span></div>
 </div>
 
+<ol class="plan">
+<li><a href="#paysage">Le paysage : un attachement massif à l'État garant</a></li>
+<li><a href="#profil">Le profil social explique peu, sauf le nucléaire</a></li>
+<li><a href="#structures">Quatre blocs d'opinions et deux typologies</a></li>
+<li><a href="#hypotheses">Des hypothèses intuitives, souvent démenties</a></li>
+<li><a href="#coherence">Des opinions qui ne se répondent pas</a></li>
+<li><a href="#genre">Le nucléaire, la connaissance et le genre</a></li>
+</ol>
 
-## Quatre blocs, huit axes
 
-Chaque bloc de questions a sa propre analyse factorielle, avec les « Ne sait pas » en modalités passives. Le tableau donne, pour chaque axe retenu, ses deux pôles et la variable sociale qui lui est la plus liée (η², part de la variance de l'axe expliquée par cette variable).
+## 1. Le paysage : un attachement massif à l'État garant {#paysage}
 
-<div class="tableau">
-```{r tableau-axes}
-axes |>
-  transmute(Bloc = if_else(bloc == lag(bloc, default = ""), "", bloc),
-            Axe = paste(code, "·", nom_axe),
-            Inertie = pct(inertie, 1),
-            `Un pôle` = un_pole,
-            `L'autre pôle` = autre_pole,
-            `Variable la plus liée` = libelles_sociaux[variable],
-            `η²` = nombre(eta2, 3)) |>
-  kable(format = "html", align = "llrllll", escape = TRUE)
-```
-</div>
+<div class="message"><p>`r pct(paysage$valeur[1])` des répondants citent l'État comme garant de l'accès à l'énergie, et `r pct(paysage$valeur[2])` préfèrent le même prix et le même service partout, même si acheminer l'énergie coûte plus cher dans certains territoires. La concurrence et la décentralisation restent minoritaires. Sur la transition, les instruments incitatifs (bonus) sont bien acceptés, les instruments punitifs (malus) beaucoup moins.</p></div>
 
-<p class="note">Inertie : taux modifiés de Benzécri pour les ACM, part d'inertie brute pour l'ACP de la transition. Service public : tous les répondants. Transition : ceux qui ont rempli les classements. Gestes et marché : questionnaires longs.</p>
-
-### Le service public n'a presque pas d'assise sociale
-
-Au-delà de 0,05, le lien entre une variable sociale et un axe est notable ; sous 0,01, il est négligeable. Les axes du service public ne dépassent nulle part `r nombre(max(eta2$eta2[eta2$bloc == "Service public"]), 3)`. Les gestes suivent la condition matérielle (statut d'occupation, logement) et le cycle de vie, la transition l'âge et le sexe.
-
-```{r figure-eta2, fig.height = 4.6}
-eta2 |>
-  left_join(select(poles, bloc, axe, code), by = c("bloc", "axe")) |>
-  mutate(code = factor(code, levels = poles$code),
-         variable = factor(libelles_sociaux[variable], levels = rev(libelles_sociaux))) |>
-  ggplot(aes(code, variable, fill = eta2)) +
-  geom_tile(colour = "white", linewidth = 1) +
-  geom_text(aes(label = nombre(eta2, 2), colour = eta2 > 0.09), size = 3.4) +
-  scale_fill_gradient(low = "#f1f5f8", high = bleu, limits = c(0, 0.18), oob = scales::squish) +
-  scale_colour_manual(values = c(`FALSE` = "#1d2430", `TRUE` = "white"), guide = "none") +
-  scale_x_discrete(position = "top") +
+```{r figure-paysage, fig.height = 6.4}
+paysage |>
+  mutate(theme = factor(theme, levels = unique(theme)),
+         libelle = fct_rev(factor(libelle, levels = libelle))) |>
+  ggplot(aes(valeur, libelle, fill = theme)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = pct(valeur)), hjust = -0.15, size = 3.4) +
+  facet_grid(theme ~ ., scales = "free_y", space = "free_y") +
+  scale_fill_manual(values = c(bleu, ocre, violet, vert), guide = "none") +
+  scale_x_continuous(limits = c(0, 100), labels = ~ paste0(.x, " %")) +
   labs(x = NULL, y = NULL) +
-  theme(legend.position = "none", panel.grid = element_blank())
+  theme(strip.text.y = element_text(angle = 0, hjust = 0, face = "bold"))
 ```
 
+<p class="note">Parts pondérées. « Pratiques » : questionnaires longs seulement (`r nombre(sum(df$long))` personnes ayant un contrat d'électricité à leur nom).</p>
 
-## Les blocs varient presque indépendamment
-
-Les analyses factorielles multiples comparent la structure des blocs deux à deux. Le coefficient RV va de 0 (aucun lien) à 1 (même structure). Le seul lien net relie les deux classements de la transition (RV = `r nombre(max(rv$rv), 2)`) ; tous les autres restent sous `r nombre(max(rv$rv[rv$afm == "B"]), 2)`. Il n'y a donc pas de typologie à construire : une classification ne reproduirait que des modalités isolées.
-
-```{r figure-rv, fig.height = 5}
-rv |>
-  mutate(couple = paste0(afm, " · ", groupe, " × ", groupe2),
-         afm = if_else(afm == "A", "A : positions politiques (tous)", "B : représentations et pratiques (longs)")) |>
-  ggplot(aes(rv, fct_reorder(couple, rv), fill = afm)) +
-  geom_col(width = 0.7) +
-  geom_text(aes(label = nombre(rv, 2)), hjust = -0.2, size = 3.3) +
-  scale_fill_manual(values = c(bleu, rouge)) +
-  scale_x_continuous(limits = c(0, 0.25), labels = ~ nombre(.x, 2)) +
-  labs(x = "Coefficient RV", y = NULL)
-```
-
-Les corrélations entre les coordonnées des répondants sur les axes de chaque bloc donnent la même image. Les liens les plus nets associent les renouvelables à l'entrée dans le marché et à la disposition à payer pour une offre verte, et la connaissance du réseau au nucléaire.
-
-```{r figure-correlations, fig.height = 4.8}
-correlations |>
-  slice_head(n = 12) |>
-  ggplot(aes(r, fct_reorder(couple, abs(r)), fill = r > 0)) +
-  geom_col(width = 0.6) +
-  geom_vline(xintercept = 0, colour = "grey50") +
-  geom_text(aes(label = nombre(r, 2), hjust = if_else(r > 0, -0.2, 1.2)), size = 3.3) +
-  scale_fill_manual(values = c(`TRUE` = bleu, `FALSE` = rouge), guide = "none") +
-  scale_x_continuous(limits = c(-0.35, 0.35), labels = ~ nombre(.x, 1)) +
-  labs(x = "Corrélation pondérée", y = NULL) +
-  theme(legend.position = "none")
-```
-
-<p class="note">Corrélations pondérées, sur les longs qui ont rempli les classements. Les douze couples les plus corrélés sont représentés.</p>
+La connaissance du système électrique est faible : `r pct(paysage$valeur[paysage$libelle == "Ne connaît ni l'un ni l'autre"])` des répondants ne savent dire le rôle ni de RTE (le transport) ni d'Enedis (la distribution). Côté pratiques, l'offre verte reste minoritaire (`r pct(paysage$valeur[paysage$libelle == "A souscrit une offre verte"])` l'ont souscrite) et un tiers des titulaires de contrat s'en méfient.
 
 
-## Ce que le profil social explique
+## 2. Le profil social explique peu, sauf le nucléaire {#profil}
 
-Pour chacune des neuf positions, quatre modèles emboîtés sont estimés sur les mêmes répondants : M1 profil social (âge, sexe, diplôme, revenu), M2 avec les conditions de vie, M3 avec le rapport à l'énergie (connaissance du réseau, intérêt pour l'énergie), M4 avec la conception du service public. L'âge reste significatif pour `r n_significatif("Âge")` positions sur 9 après correction de Benjamini-Hochberg, le rapport à l'énergie pour `r n_significatif("Rapport à l'énergie")`, le diplôme pour `r if (n_significatif("Diplôme") == 0) "aucune" else n_significatif("Diplôme")`.
+<div class="message"><p>Pour chacune des neuf positions, quatre modèles emboîtés ajoutent tour à tour le profil social (âge, sexe, diplôme, revenu), les conditions de vie, le rapport à l'énergie et la conception du service public. Le R² ne dépasse `r nombre(r2_max_opinions, 2)` pour aucune opinion, hors le nucléaire. Le nucléaire fait exception (R² de `r nombre(r2_nucleaire, 2)`), presque entièrement grâce au seul profil social.</p></div>
 
-### Le nucléaire est la seule opinion que le profil explique vraiment
+### Combien chaque position est-elle expliquée ?
 
 ```{r figure-r2, fig.height = 4.6}
 etapes <- c("M1 profil social", "+ conditions de vie", "+ rapport à l'énergie", "+ conception du SP")
@@ -312,15 +338,16 @@ r2 |>
   geom_col(width = 0.7) +
   geom_text(data = \(d) distinct(d, nom, R2_M4), aes(R2_M4, nom, label = nombre(R2_M4, 3)),
             inherit.aes = FALSE, hjust = -0.2, size = 3.3) +
-  scale_fill_manual(values = setNames(c(bleu, "#6f9cc0", "#b7cde0", "#D9A441"), etapes),
-                    breaks = etapes) +
+  scale_fill_manual(values = setNames(c(bleu, "#6f9cc0", "#b7cde0", ocre), etapes), breaks = etapes) +
   scale_x_continuous(limits = c(0, 0.17), labels = ~ nombre(.x, 2)) +
   labs(x = "R² pondéré", y = NULL)
 ```
 
-<p class="note">Chaque segment est le gain de R² apporté par le bloc ajouté. Les R² d'une variable binaire et d'un score continu ne sont pas directement comparables : on compare plutôt la répartition du R² entre les blocs, ci-dessous.</p>
+<p class="note">Chaque segment est le gain de R² apporté par le bloc ajouté. Les R² d'une variable binaire et d'un score continu ne se comparent pas directement : on compare plutôt leur répartition entre les blocs, ci-dessous.</p>
 
-### Quels blocs portent l'explication
+### Quels blocs portent l'explication ?
+
+Pour le nucléaire, le sexe pèse `r pct(shapley("pro_nucleaire_pts", "Sexe"))` du R² et l'âge `r pct(shapley("pro_nucleaire_pts", "Âge"))`. Pour les gestes, c'est le rapport à l'énergie (`r pct(shapley("gestes_part_pts", "Rapport à l'énergie"))`), surtout l'intérêt. Pour la concurrence, la conception du service public (`r pct(shapley("concurrence", "Conception du SP"))`).
 
 ```{r figure-shapley, fig.height = 4.8}
 reg$shapley |>
@@ -336,9 +363,9 @@ reg$shapley |>
   guides(fill = guide_legend(nrow = 1))
 ```
 
-<p class="note">Le sexe pèse `r pct(part_sexe)` du R² pour le nucléaire ; la conception du service public `r pct(reg$shapley$part[reg$shapley$variable == "concurrence" & reg$shapley$bloc == "Conception du SP"])` pour la préférence pour la concurrence. Le bloc « conception du SP » est exclu pour l'axe du service public, construit à partir des mêmes questions.</p>
+### Quels blocs restent significatifs ?
 
-### Blocs significatifs, position par position
+L'âge reste significatif pour `r n_significatif("Âge")` positions sur 9 après correction pour tests multiples, le rapport à l'énergie pour `r n_significatif("Rapport à l'énergie")`, le sexe pour `r n_significatif("Sexe")` (les deux mesures du nucléaire), le diplôme pour `r if (n_significatif("Diplôme") == 0) "aucune" else n_significatif("Diplôme")`.
 
 ```{r figure-tests, fig.height = 4.2}
 reg$tests |>
@@ -357,45 +384,164 @@ reg$tests |>
   theme(panel.grid.major.y = element_line(colour = "grey92"))
 ```
 
-<p class="note">Test de Wald de chaque bloc dans M4, p-valeurs corrigées par Benjamini-Hochberg.</p>
+<p class="note">Test de Wald de chaque bloc dans le modèle complet, p-valeurs corrigées par Benjamini-Hochberg.</p>
 
-Les résultats tiennent en logit, en logit ordonné, sur le nombre de gestes faits et sans pondération : sur `r nrow(reg$robustesse)` comparaisons de coefficients, `r desaccords` changent de significativité et `r if (inversions == 0) "aucun ne change de signe" else paste(inversions, "changent de signe")`.
+### Le détail des coefficients, pour les positions les mieux expliquées
 
-
-## Le nucléaire, une affaire de sexe à tout âge
-
-Le soutien au nucléaire est mesuré par le score pro-nucléaire du script 7 : la moyenne de ses rangs dans les deux classements (productions et leviers), de 0 (jamais cité) à 100 (premier partout). À tout âge, les hommes sont nettement plus pro-nucléaires que les femmes : `r nombre(score("Homme", "18-34"))` contre `r nombre(score("Femme", "18-34"))` chez les 18-34 ans, `r nombre(score("Homme", "65+"))` contre `r nombre(score("Femme", "65+"))` chez les 65 ans et plus. En première production, l'écart va du simple au double : `r pct(premier("Homme", "18-34"))` contre `r pct(premier("Femme", "18-34"))` chez les 18-34 ans.
-
-À autres caractéristiques égales, l'écart varie avec l'âge (interaction sexe × âge : p = `r nombre(p_age, 3)`) : il est le plus grand chez les 18-34 ans. Il ne varie pas significativement avec le diplôme (p = `r nombre(p_diplome, 2)`), même s'il se réduit de `r nombre(ecart_bac5)` points chez les bac+5. Ces interactions dépendent de la mesure : avec le seul premier choix de production, c'était l'inverse (l'âge ne jouait pas, le diplôme si). Elles restent donc fragiles.
-
-```{r figure-sexe-age, fig.height = 3.6}
-nucleaire_sexe_age |>
-  mutate(sexe = if_else(sexe == "Homme", "Hommes", "Femmes"),
-         AGE_large = fct_rev(factor(AGE_large))) |>
-  ggplot(aes(pro_nucleaire_pts, AGE_large, colour = sexe)) +
-  geom_line(aes(group = AGE_large), colour = "grey75", linewidth = 1.2) +
-  geom_errorbarh(aes(xmin = pro_nucleaire_pts - 1.96 * se.pro_nucleaire_pts,
-                     xmax = pro_nucleaire_pts + 1.96 * se.pro_nucleaire_pts),
-                 height = 0.15, alpha = 0.6) +
-  geom_point(size = 3.5) +
-  geom_text(aes(label = nombre(pro_nucleaire_pts)), vjust = -1.1, size = 3.3, show.legend = FALSE) +
-  scale_colour_manual(values = c(Hommes = bleu, Femmes = rouge)) +
-  scale_x_continuous(limits = c(0, 80)) +
-  labs(x = "Score pro-nucléaire moyen, de 0 à 100 (IC à 95 %)", y = NULL)
+```{r figure-coefficients, fig.height = 7.2}
+prol$coefficients_tableau |>
+  ggplot(aes(estimation, terme, colour = significatif)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_pointrange(aes(xmin = ic_bas, xmax = ic_haut), size = 0.25) +
+  facet_wrap(~ modele, nrow = 1, scales = "free_x", labeller = label_wrap_gen(18)) +
+  scale_colour_manual(values = c("FALSE" = "grey65", "TRUE" = bleu), guide = "none") +
+  labs(x = NULL, y = NULL) +
+  theme(panel.grid.major.y = element_line(colour = "grey94"), axis.text.y = element_text(size = 9))
 ```
 
-```{r figure-sexe-age-modele, fig.height = 2.8}
-ggplot(ecart_age, aes(ecart, fct_rev(age))) +
-  geom_col(fill = rouge, width = 0.6) +
-  geom_vline(xintercept = 0, colour = "grey50") +
-  geom_text(aes(label = nombre(ecart)), hjust = 1.3, size = 3.3) +
-  scale_x_continuous(limits = c(-30, 0)) +
-  labs(x = "Écart femmes − hommes sur le score, à autres caractéristiques égales", y = NULL)
+<p class="note">Modèles complets, MCO pondérés, intervalles à 95 % ; en bleu, les coefficients significatifs à 5 %. Références : 35-49 ans, homme, bac, revenu de 1 500 à 2 500 euros, urbain, maison, propriétaire. Les échelles diffèrent d'un panneau à l'autre.</p>
+
+Ces résultats tiennent en logit, en logit ordonné, en logit fractionnaire pour les gestes et sans pondération : sur `r nrow(reg$robustesse)` comparaisons de coefficients, `r desaccords` changent de significativité et `r if (inversions == 0) "aucun ne change de signe" else paste(inversions, "changent de signe")`.
+
+
+## 3. Quatre blocs d'opinions et deux typologies {#structures}
+
+<div class="message"><p>Chaque bloc de questions a sa propre analyse factorielle (ACM spécifique, « Ne sait pas » passifs). Le service public s'organise d'abord autour d'un axe « public et national » contre « marché et décentralisation », la transition autour du nucléaire contre les renouvelables. Mais seuls les gestes ont une assise sociale nette : ils suivent le logement plus que les opinions.</p></div>
+
+<div class="tableau">
+```{r tableau-axes}
+axes |>
+  transmute(Bloc = if_else(bloc == lag(bloc, default = ""), "", bloc),
+            Axe = paste(code, "·", nom_axe),
+            Inertie = pct(inertie, 1),
+            `Un pôle` = un_pole,
+            `L'autre pôle` = autre_pole,
+            `Variable la plus liée` = libelles_sociaux[variable],
+            `η²` = nombre(eta2, 3)) |>
+  kable(format = "html", align = "llrllll", escape = TRUE)
+```
+</div>
+
+<p class="note">Inertie : taux modifiés de Benzécri pour les ACM, part d'inertie brute pour l'ACP de la transition. η² : part de la variance de l'axe expliquée par la variable sociale la plus liée.</p>
+
+### Le service public n'a presque pas d'assise sociale
+
+Au-delà de 0,05, le lien entre une variable sociale et un axe est notable ; sous 0,01, il est négligeable. Les axes du service public ne dépassent nulle part `r nombre(max(eta2$eta2[eta2$bloc == "Service public"]), 3)`, quand les gestes suivent le statut d'occupation et le logement.
+
+```{r figure-eta2, fig.height = 4.6}
+eta2 |>
+  left_join(select(poles, bloc, axe, code), by = c("bloc", "axe")) |>
+  mutate(code = factor(code, levels = poles$code),
+         variable = factor(libelles_sociaux[variable], levels = rev(libelles_sociaux))) |>
+  ggplot(aes(code, variable, fill = eta2)) +
+  geom_tile(colour = "white", linewidth = 1) +
+  geom_text(aes(label = nombre(eta2, 2), colour = eta2 > 0.09), size = 3.4) +
+  scale_fill_gradient(low = "#f1f5f8", high = bleu, limits = c(0, 0.18), oob = scales::squish) +
+  scale_colour_manual(values = c(`FALSE` = "#1d2430", `TRUE` = "white"), guide = "none") +
+  scale_x_discrete(position = "top") +
+  labs(x = NULL, y = NULL) +
+  theme(legend.position = "none", panel.grid = element_blank())
 ```
 
-### Offre verte : le scepticisme ne freine pas ceux qui sont prêts à payer
+### Quatre conceptions du service public
 
-Chaque point de disposition à payer plus pour une offre verte va avec `r nombre(offre["payer_vert", 1], 1)` points de probabilité supplémentaire d'en avoir souscrit une. Le scepticisme abaisse le niveau de souscription, nettement en logit, mais ne réduit pas la pente : l'interaction n'est pas significative à 5 % (p = `r nombre(offre["payer_vert:sceptique", 4], 2)`), et l'hypothèse n'est pas confirmée.
+Une classification sur les trois premiers axes de l'ACM distingue quatre conceptions. Elles diffèrent surtout par la place de l'État : garant unique d'un monopole national, garant d'un marché concurrentiel, garant avec les entreprises publiques et les collectivités, ou absent.
+
+```{r figure-typologie-sp, fig.height = 6.4}
+modalites_actives_sp <- typo$descriptions |>
+  filter(typologie == "sp", !str_detect(modalite, "^(Sexe|Âge|Diplôme|Revenu|Activité|Zone|Statut|Réseau|Intérêt)"))
+modalites_actives_sp |>
+  group_by(classe) |>
+  slice_max(v_test, n = 6) |>
+  ungroup() |>
+  mutate(classe = factor(paste0(classe, " (", pct(map_dbl(classe, taille)), ")"),
+                         levels = paste0(levels(classes$classe_sp), " (", pct(map_dbl(levels(classes$classe_sp), taille)), ")")),
+         modalite = fct_reorder(paste0(classe, "___", modalite), pct_classe)) |>
+  ggplot(aes(y = modalite)) +
+  geom_col(aes(x = pct_classe), fill = bleu, width = 0.7) +
+  geom_errorbar(aes(xmin = pct_ensemble, xmax = pct_ensemble), colour = ocre, linewidth = 1.2, width = 0.8) +
+  facet_wrap(~ classe, scales = "free_y", ncol = 2) +
+  scale_y_discrete(labels = function(x) sub("^.*___", "", x)) +
+  scale_x_continuous(labels = ~ paste0(.x, " %")) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.y = element_text(size = 9), strip.text = element_text(face = "bold", hjust = 0))
+```
+
+<p class="note">Pour chaque classe, les six modalités les plus caractéristiques : % dans la classe (barre) et dans l'ensemble (trait).</p>
+
+### Quatre rapports aux gestes
+
+```{r figure-typologie-gestes, fig.height = 6.4}
+typo$descriptions |>
+  filter(typologie == "gestes", !str_detect(modalite, "^(Sexe|Âge|Diplôme|Revenu|Activité|Zone|Logement|Statut|Chauffage|Difficultés|Intérêt)")) |>
+  group_by(classe) |>
+  slice_max(v_test, n = 6) |>
+  ungroup() |>
+  mutate(classe = factor(paste0(classe, " (", pct(map_dbl(classe, taille)), ")"),
+                         levels = paste0(levels(classes$classe_gestes), " (", pct(map_dbl(levels(classes$classe_gestes), taille)), ")")),
+         modalite = fct_reorder(paste0(classe, "___", modalite), pct_classe)) |>
+  ggplot(aes(y = modalite)) +
+  geom_col(aes(x = pct_classe), fill = vert, width = 0.7) +
+  geom_errorbar(aes(xmin = pct_ensemble, xmax = pct_ensemble), colour = ocre, linewidth = 1.2, width = 0.8) +
+  facet_wrap(~ classe, scales = "free_y", ncol = 2) +
+  scale_y_discrete(labels = function(x) sub("^.*___", "", x)) +
+  scale_x_continuous(labels = ~ paste0(.x, " %")) +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.y = element_text(size = 9), strip.text = element_text(face = "bold", hjust = 0))
+```
+
+<p class="note">Questionnaires longs. « Non concernés » : surtout des locataires en appartement ; « déjà engagés » : surtout des propriétaires de maison.</p>
+
+### Des conceptions sans base sociale, des pratiques très sociales
+
+Les deux typologies n'ont pas le même rapport au social : les conceptions du service public ne dépassent nulle part un V de Cramér de `r nombre(max(typo$liens_sociaux$v_cramer[typo$liens_sociaux$typologie == "classe_sp"]), 2)`, quand le statut d'occupation atteint `r nombre(v_social("classe_gestes", "Statut"), 2)` pour les gestes.
+
+```{r figure-liens-sociaux, fig.height = 3.8}
+typo$liens_sociaux |>
+  mutate(typologie = if_else(typologie == "classe_sp", "Conceptions du service public", "Rapports aux gestes"),
+         variable = fct_reorder(variable, v_cramer, max)) |>
+  ggplot(aes(v_cramer, variable, fill = typologie)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.7) +
+  geom_text(aes(label = nombre(v_cramer, 2)), position = position_dodge(width = 0.75), hjust = -0.2, size = 3.1) +
+  scale_fill_manual(values = c(bleu, vert)) +
+  scale_x_continuous(limits = c(0, 0.33), labels = ~ nombre(.x, 1)) +
+  labs(x = "V de Cramér pondéré avec la classe", y = NULL)
+```
+
+
+## 4. Des hypothèses intuitives, souvent démenties {#hypotheses}
+
+<div class="message"><p>Cinq interactions ont été choisies avant d'être testées, pour des raisons de fond, et leurs p-valeurs corrigées pour les tests multiples. Deux sont confirmées et concernent le genre (partie 6). Les trois autres, plus intuitives, ne le sont pas : le malus n'est pas plus rejeté par les ruraux modestes, le revenu ne bride pas le passage de l'intérêt aux gestes, et le scepticisme ne freine pas ceux qui sont prêts à payer pour le vert.</p></div>
+
+### Le malus n'est pas rejeté par les ruraux modestes
+
+On pouvait attendre, dans le sillage des gilets jaunes, que les ruraux modestes, dépendants de la voiture et du fioul, rejettent davantage un malus sur les énergies fossiles. Ce n'est pas le cas : aucun écart entre zones n'est significatif, à aucun niveau de revenu (interaction : p = `r nombre(p_inter("D"), 2)`).
+
+```{r figure-malus, fig.height = 4}
+graphique_interaction("D", axe_y = "Malus jugé acceptable (%)")
+```
+
+### L'intérêt se traduit en gestes à tous les niveaux de revenu
+
+Passer d'un intérêt pour l'énergie de 2 à 5 sur 5 va avec `r nombre(ecart("E", "< 1 000"))` points de gestes en plus chez les plus modestes, et `r nombre(ecart("E", "4 000 et +"))` chez les plus aisés, sans que la différence soit significative (p = `r nombre(p_inter("E"), 2)`).
+
+```{r figure-gestes-revenu, fig.height = 4}
+graphique_interaction("E", etiquette_groupe = \(g) paste0("Intérêt pour l'énergie : ", g, "/5"),
+                      axe_y = "Part des gestes faits (%)")
+```
+
+### Connaître le système éloigne de la concurrence, sauf si l'on pense le service public par sa mission
+
+Connaître les deux acteurs du réseau va avec moins de soutien à la concurrence chez ceux qui définissent le service public par l'organisme public (`r nombre(ecart("C", "Organisme public"), 2)` sur l'échelle de 1 à 5), mais pas chez ceux qui le définissent par sa mission (`r nombre(ecart("C", "Mission d'intérêt général"), 2)`). L'interaction n'est pas significative (p = `r nombre(p_inter("C"), 2)`) : c'est une piste.
+
+```{r figure-concurrence, fig.height = 4}
+graphique_interaction("C", etiquette_groupe = \(g) paste(g, "acteur(s) du réseau connu(s) sur 2"),
+                      axe_y = "Soutien à la concurrence (1-5)")
+```
+
+### L'offre verte : le scepticisme abaisse le niveau, pas la pente
+
+Chaque point de disposition à payer plus va avec `r nombre(offre["payer_vert", 1], 1)` points de probabilité supplémentaire d'avoir souscrit une offre verte. Le scepticisme abaisse le niveau de souscription (nettement en logit, faiblement en probabilité) mais ne réduit pas l'effet de la disposition à payer (p = `r nombre(offre["payer_vert:sceptique", 4], 2)`).
 
 <div class="tableau">
 ```{r tableau-offre-verte}
@@ -405,21 +551,187 @@ termes <- c("payer_vert" = "Disposition à payer plus (par point)",
 tibble(Terme = termes,
        `Coefficient (pts)` = nombre(offre[names(termes), 1], 1),
        `Écart-type` = nombre(offre[names(termes), 2], 1),
-       p = if_else(offre[names(termes), 4] < 0.001, "< 0,001", nombre(offre[names(termes), 4], 3))) |>
+       p = valeur_p(offre[names(termes), 4])) |>
   kable(format = "html", align = "lrrr")
 ```
 </div>
 
+
+## 5. Des opinions qui ne se répondent pas {#coherence}
+
+<div class="message"><p>On s'attendrait à ce que les partisans d'un service public national soient aussi ceux qui défendent le nucléaire historique, ou que les partisans du marché soient ceux qui changent de fournisseur. Ce n'est presque jamais le cas. Les blocs d'opinions varient indépendamment, même chez les plus informés : la gouvernance du service public est un domaine à part.</p></div>
+
+### Les blocs n'ont presque rien en commun
+
+Les analyses factorielles multiples comparent la structure des blocs deux à deux, par le coefficient RV (de 0, aucun lien, à 1, même structure). Le seul lien net relie les deux classements de la transition (RV = `r nombre(max(rv$rv), 2)`).
+
+```{r figure-rv, fig.height = 5}
+rv |>
+  mutate(couple = paste0(afm, " · ", groupe, " × ", groupe2),
+         afm = if_else(afm == "A", "A : positions politiques (tous)", "B : représentations et pratiques (longs)")) |>
+  ggplot(aes(rv, fct_reorder(couple, rv), fill = afm)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = nombre(rv, 2)), hjust = -0.2, size = 3.3) +
+  scale_fill_manual(values = c(bleu, rouge)) +
+  scale_x_continuous(limits = c(0, 0.25), labels = ~ nombre(.x, 2)) +
+  labs(x = "Coefficient RV", y = NULL)
+```
+
+### Question par question, la même image
+
+Les corrélations entre treize questions d'opinion le confirment : la gouvernance du service public (en haut à gauche) ne se relie ni aux priorités, ni aux instruments de la transition. Les priorités et les instruments se répondent davantage : le pro-nucléaire va avec le rejet du bonus et du malus, les renouvelables avec le bonus.
+
+```{r figure-correlations-questions, fig.height = 7.4}
+questions <- coherence$questions
+noms <- setNames(questions$nom, questions$variable)
+as.data.frame(as.table(coherence$correlations)) |>
+  mutate(Var1 = factor(noms[as.character(Var1)], levels = questions$nom),
+         Var2 = factor(noms[as.character(Var2)], levels = rev(questions$nom)),
+         Freq = if_else(Var1 == Var2, NA_real_, Freq)) |>
+  ggplot(aes(Var1, Var2, fill = Freq)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = if_else(is.na(Freq), "", nombre(Freq, 2))), size = 2.7) +
+  annotate("rect", xmin = c(0.5, 6.5, 9.5), xmax = c(6.5, 9.5, 13.5),
+           ymin = c(7.5, 4.5, 0.5), ymax = c(13.5, 7.5, 4.5),
+           fill = NA, colour = "grey30", linewidth = 0.6) +
+  scale_fill_gradient2(low = rouge, mid = "white", high = bleu, midpoint = 0,
+                       limits = c(-0.4, 0.4), na.value = "grey95", guide = "none") +
+  labs(x = NULL, y = NULL) +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1), panel.grid = element_blank())
+```
+
+<p class="note">Corrélations pondérées, sur les `r nombre(2196)` répondants qui ont répondu aux treize questions. Encadrés : gouvernance du service public, priorités de la transition, instruments de la transition.</p>
+
+Deux questions d'un même bloc partagent en moyenne `r pct(coh[["À l'intérieur des blocs"]], 2)` de leur variance, deux questions de blocs différents `r pct(coh[["Entre les blocs"]], 2)`, et la gouvernance du service public et les priorités de la transition `r pct(coh[["SP / priorités"]], 2)` : presque rien.
+
+### Les typologies croisées : aucun lien
+
+Les conceptions du service public et les rapports aux gestes sont indépendants (V de Cramér = `r nombre(v_croisement, 2)`) : chaque conception compte la même proportion de réfractaires. Avec la transition, les conceptions ne se distinguent que sur le rôle de l'État : l'investissement public est jugé acceptable par `r pct(position_classe("classe_sp", "Investissement public (%)", "Service public élargi"))` de la classe « service public élargi », contre `r pct(position_classe("classe_sp", "Investissement public (%)", "En dehors de l'État"))` de la classe « en dehors de l'État ». Elles ne diffèrent pas sur le nucléaire (p = `r nombre(p_position("classe_sp", "Pro-nucléaire (0-100)"), 2)`). Les réfractaires aux gestes, eux, sont les plus pro-nucléaires et les plus hostiles au malus.
+
+<div class="tableau">
+```{r tableau-positions-classes}
+# Une ligne par position, une colonne par classe
+tableau_classes <- function(t) {
+  typo$positions_classes |>
+    filter(typologie == t) |>
+    mutate(cellule = if_else(str_detect(position, "1-5"), nombre(moyenne, 1), nombre(moyenne, 0)),
+           classe = factor(classe, levels = levels(classes[[t]]))) |>
+    arrange(classe) |>
+    select(Position = position, classe, cellule, p_classes) |>
+    pivot_wider(names_from = classe, values_from = cellule) |>
+    mutate(p = valeur_p(p_classes), .keep = "unused")
+}
+
+kable(tableau_classes("classe_sp"), format = "html", align = "lrrrrr",
+      caption = "Positions sur la transition selon la conception du service public")
+```
+</div>
+
+<div class="tableau">
+```{r tableau-positions-gestes}
+kable(tableau_classes("classe_gestes"), format = "html", align = "lrrrrr",
+      caption = "Positions sur la transition selon le rapport aux gestes (longs)")
+```
+</div>
+
+<p class="note">Moyennes pondérées, en % (score de 0 à 100 pour le pro-nucléaire, échelle de 1 à 5 pour la disposition à payer). p : test d'égalité entre les classes.</p>
+
+### Les plus informés ne sont guère plus cohérents
+
+L'idée classique de « contrainte » (Converse, 1964) veut que les personnes les plus informées aient des opinions plus liées entre elles, rattachées à des principes communs. À l'intérieur des blocs, la cohérence augmente bien avec la connaissance du réseau (de `r pct(coh_groupe("connaissance", "0 acteur connu", "À l'intérieur des blocs"), 2)` à `r pct(coh_groupe("connaissance", "2 acteurs connus", "À l'intérieur des blocs"), 2)` de variance partagée). Entre les blocs, seul le diplôme fait une différence nette : `r pct(coh_groupe("diplome_3", "Bac+5", "Entre les blocs"), 2)` chez les bac+5 contre `r pct(coh_groupe("diplome_3", "Bac ou moins", "Entre les blocs"), 2)` pour les bacheliers et moins. Ce surcroît vient des liens entre fins et moyens de la transition (renouvelables et bonus, sobriété et régulation) ; la gouvernance du service public reste isolée dans tous les groupes.
+
+```{r figure-coherence, fig.height = 6.6}
+coherence$par_groupe |>
+  filter(type %in% c("À l'intérieur des blocs", "Entre les blocs")) |>
+  mutate(variable = recode(variable, connaissance = "Connaissance du réseau",
+                           interet = "Intérêt pour l'énergie", diplome_3 = "Diplôme", AGE_large = "Âge"),
+         variable = factor(variable, levels = c("Connaissance du réseau", "Intérêt pour l'énergie", "Diplôme", "Âge")),
+         groupe = fct_inorder(groupe)) |>
+  ggplot(aes(coherence, fct_rev(groupe), colour = type)) +
+  geom_vline(xintercept = 0, colour = "grey60") +
+  geom_pointrange(aes(xmin = ic_bas, xmax = ic_haut), position = position_dodge(width = 0.5)) +
+  facet_grid(variable ~ ., scales = "free_y", space = "free_y") +
+  scale_colour_manual(values = c(bleu, ocre)) +
+  labs(x = "Part de variance partagée en moyenne par deux questions (r² corrigé, en %)", y = NULL) +
+  theme(strip.text.y = element_text(angle = 0, hjust = 0), panel.grid.major.y = element_line(colour = "grey94"))
+```
+
+<p class="note">r² moyen entre deux questions, corrigé de sa valeur attendue sans aucun lien (1 / (n − 1)) pour comparer des groupes de tailles différentes. Intervalles à 95 % par bootstrap.</p>
+
+
+## 6. Le nucléaire, la connaissance et le genre {#genre}
+
+<div class="message"><p>Les femmes sont nettement moins pro-nucléaires que les hommes, à tout âge, et elles connaissent beaucoup moins le système électrique. On pourrait croire que le premier écart découle du second. Ce n'est pas le cas : les deux écarts n'ont pas la même forme selon l'âge, et à connaissance égale, plus de 90 % de l'écart sur le nucléaire demeure.</p></div>
+
+### Le nucléaire : un écart net à tout âge
+
+Le score pro-nucléaire est la moyenne des rangs du nucléaire dans les deux classements (productions et leviers), de 0 (jamais cité) à 100 (premier partout). Les hommes de 18-34 ans ont un score de `r nombre(score("Homme", "18-34"))`, les femmes du même âge de `r nombre(score("Femme", "18-34"))`. En première production, l'écart va du simple au double : `r pct(premier("Homme", "18-34"))` contre `r pct(premier("Femme", "18-34"))`.
+
+```{r figure-sexe-age, fig.height = 3.6}
+nucleaire_sexe_age |>
+  mutate(sexe = if_else(sexe == "Homme", "Hommes", "Femmes"),
+         AGE_large = fct_rev(factor(AGE_large))) |>
+  ggplot(aes(pro_nucleaire_pts, AGE_large, colour = sexe)) +
+  geom_line(aes(group = AGE_large), colour = "grey75", linewidth = 1.2) +
+  geom_errorbar(aes(xmin = pro_nucleaire_pts - 1.96 * se.pro_nucleaire_pts,
+                    xmax = pro_nucleaire_pts + 1.96 * se.pro_nucleaire_pts),
+                width = 0.15, alpha = 0.6, orientation = "y") +
+  geom_point(size = 3.5) +
+  geom_text(aes(label = nombre(pro_nucleaire_pts)), vjust = -1.1, size = 3.3, show.legend = FALSE) +
+  scale_colour_manual(values = c(Hommes = bleu, Femmes = rouge)) +
+  scale_x_continuous(limits = c(0, 80)) +
+  labs(x = "Score pro-nucléaire moyen, de 0 à 100 (IC à 95 %)", y = NULL)
+```
+
+### La connaissance : elle augmente avec l'âge chez les hommes seulement
+
+À autres caractéristiques égales, les hommes connaissent de mieux en mieux le réseau avec l'âge (de `r nombre(predite("A", "18-34", "Homme"), 2)` à `r nombre(predite("A", "65+", "Homme"), 2)` acteur connu sur 2), les femmes presque pas (de `r nombre(predite("A", "18-34", "Femme"), 2)` à `r nombre(predite("A", "65+", "Femme"), 2)`). L'écart double entre les plus jeunes et les plus âgés (interaction : p `r if_else(p_inter("A") < 0.001, "< 0,001", paste("=", nombre(p_inter("A"), 3)))`, `r nombre(p_inter_bh("A"), 3)` après correction).
+
+```{r figure-connaissance, fig.height = 4}
+graphique_interaction("A", axe_y = "Acteurs du réseau connus (sur 2)")
+```
+
+### Le nucléaire, lui, ne suit pas cette courbe
+
+Sur le nucléaire, l'écart de genre prédit est le plus grand chez les plus jeunes (`r nombre(ecart("B", "18-34"))` points), quand l'écart de connaissance y est le plus faible (interaction : p = `r nombre(p_inter("B"), 3)`).
+
+```{r figure-nucleaire-predit, fig.height = 4}
+graphique_interaction("B", axe_y = "Score pro-nucléaire prédit (0-100)")
+```
+
+<p class="note">Valeurs prédites : position moyenne si tous les répondants avaient ce sexe et cet âge, le reste de leur profil inchangé. Intervalles à 95 %.</p>
+
+### À connaissance égale, l'écart demeure
+
+À profil social égal, les femmes ont un score inférieur de `r nombre(-ecart_base, 1)` points. Ajouter la connaissance du réseau, l'intérêt pour l'énergie et la conception du service public ne le réduit que de `r nombre(ecart_reste - ecart_base, 1)` point : il en reste `r nombre(-ecart_reste, 1)`. La connaissance en explique `r nombre(-gelbach("pro_nucleaire_pts", "Connaissance du réseau"), 1)` point ; l'intérêt joue en sens inverse. L'écart de genre sur le nucléaire n'est donc pas un écart de savoir : il tient à autre chose (rapport au risque, valeurs), que l'enquête ne mesure pas.
+
+```{r figure-gelbach, fig.height = 4.2}
+prol$decomposition |>
+  filter(position == "pro_nucleaire_pts") |>
+  mutate(terme = fct_rev(factor(terme, levels = unique(terme))),
+         type = if_else(terme %in% c("Écart à profil égal", "Écart restant"),
+                        "Écart femmes − hommes", "Part passant par la variable")) |>
+  ggplot(aes(estimation, terme, fill = type)) +
+  geom_col(width = 0.6) +
+  geom_errorbar(aes(xmin = ic_bas, xmax = ic_haut), width = 0.2, orientation = "y") +
+  geom_vline(xintercept = 0, colour = "grey40") +
+  scale_fill_manual(values = c(rouge, ocre)) +
+  labs(x = "Points de score pro-nucléaire", y = NULL)
+```
+
+<p class="note">Décomposition de Gelbach : la part d'une variable est l'écart femmes − hommes sur cette variable, multiplié par son effet sur le score. Intervalles bootstrap à 95 % (500 tirages). Même résultat avec le nucléaire en première production (de `r nombre(-gelbach("nucleaire_premier_pts", "Écart à profil égal"), 1)` à `r nombre(-gelbach("nucleaire_premier_pts", "Écart restant"), 1)` points).</p>
+
+
 <details>
 <summary>Méthode et limites</summary>
 
-- Redressement par calage sur l'âge × la zone (rural / urbain) et la part d'hommes dans chaque case, avec la cible rurale corrigée de la perception (script 4). Une zone est attribuée d'après la taille de commune à `r sum(df$zone2_attribuee, na.rm = TRUE)` répondants qui n'en déclaraient pas.
+- Redressement par calage sur l'âge × la zone (rural / urbain) et la part d'hommes dans chaque case, avec la cible rurale corrigée de la perception (script 4).
 - Les questionnaires longs ne représentent pas tous les adultes : les 18-34 ans y sont moins nombreux, car il faut un contrat d'électricité à son nom.
-- ACM spécifiques : les « Ne sait pas » ne construisent pas les axes. Dans les AFM, les répondants qui ont coché « Ne sait pas » aux questions à cases sont écartés, car ils créaient un axe artificiel.
-- Les indicateurs suivent les conventions du script 7 (Antoine) : score pro-nucléaire, part des gestes faits parmi ceux qui concernent le répondant, connaissance du réseau (RTE et Enedis), zone à trois modalités, difficultés à payer rangées dans « Jamais » pour les questionnaires courts.
-- Les régressions mesurent des associations, pas des effets causaux. Ajouter la conception du service public peut absorber une partie de l'effet du profil social.
-- Les trois affirmations G5Q00002 à G5Q00004 ne sont pas utilisées : leur énoncé manque dans les dictionnaires.
-- Scripts : 1 (redressement), 3 (recodages), 5a à 5e (analyses factorielles), 6 (régressions). Ce document : `4. Rapports/Synthese_resultats.Rmd`.
+- ACM spécifiques : les « Ne sait pas » ne construisent pas les axes. Typologies : classification de Ward sur les trois premiers axes, consolidée par les k-means.
+- Les indicateurs suivent les conventions du script 7 (Antoine) : score pro-nucléaire, part des gestes faits parmi ceux pour lesquels le répondant ne s'est pas dit « non concerné », connaissance du réseau (RTE et Enedis), zone à trois modalités.
+- Les régressions mesurent des associations, pas des effets causaux. Les interactions ont été fixées avant d'être testées, et leurs p-valeurs corrigées pour cinq tests.
+- Le questionnaire n'a pas de question d'orientation politique : on ne peut pas tester si un clivage gauche-droite relierait les blocs.
+- Scripts : 1 (redressement), 3 (recodages), 5a à 5g (analyses factorielles, cohérence, typologies), 6 (régressions), 8 (interactions et prolongements). Ce document : `4. Rapports/Synthese_resultats.Rmd`.
 
 </details>
 
