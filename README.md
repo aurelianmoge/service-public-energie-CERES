@@ -39,13 +39,3 @@ Les sorties de chaque analyse factorielle sont dans `3. Outputs/Analyses factori
 régressions dans `3. Outputs/Régressions/`.
 
 Packages : `tidyverse`, `openxlsx`, `survey`, `FactoMineR`, `factoextra`, `knitr`.
-
-## Les archives
-
-Les anciens scripts sont dans `2. Scripts/Annexes` (dont le diagnostic géographique
-`3. Variable geographie.R`, et l'ancienne AFM avec sa CAH), les anciens rapports et dashboards dans
-`4. Rapports/Archives`, et les anciennes sorties dans `3. Outputs/Archives`. Ces scripts ne sont plus
-maintenus : leurs chemins ne fonctionnent plus depuis le dossier `Annexes`.
-=======
-Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 2 000 individus) à propos de leur rapport au service public de l'électricité.
->>>>>>> 8d25b4bb1f34614713c1c19bbd31941855a04224
