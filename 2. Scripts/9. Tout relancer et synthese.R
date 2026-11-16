@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Relancer toute l'analyse et produire la synthèse des résultats
 #
 # Ce script ne fait aucun calcul lui-même : il lance les scripts dans l'ordre,
@@ -17,6 +18,8 @@
 # À lancer depuis la racine du projet (ouvrir le .Rproj dans RStudio). Compter
 # deux à trois minutes.
 
+=======
+>>>>>>> 3c22a59c115aff3e9e65e192e7076f926ccec263
 
 #################################
 ### Les scripts, dans l'ordre ###
