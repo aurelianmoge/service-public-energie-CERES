@@ -8,6 +8,9 @@
 # seul : aucun objet ne passe d'un script à l'autre, tout passe par les
 # fichiers enregistrés dans "3. Outputs".
 #
+# Le script 10 écrit les tableaux LaTeX dans "5. Overleaf/tableaux Aurélian",
+# à téléverser dans le projet Overleaf.
+#
 # Le script 7 (Antoine) n'est pas relancé : il est indépendant et la synthèse
 # n'utilise pas ses sorties. Les scripts 1, 2 et 4 sont lancés par le script 3.
 #
@@ -28,7 +31,8 @@ scripts <- c("3. Recodages.R",
              "5f. Coherence entre blocs.R",
              "5g. Typologies.R",
              "6. Regressions.R",
-             "8. Interactions et prolongements.R")
+             "8. Interactions et prolongements.R",
+             "10. Tableaux LaTeX.R")
 
 for (s in scripts) {
   message("--- ", s)

@@ -39,7 +39,9 @@ library(flextable)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 racine  <- "3. Outputs/Analyses factorielles"
 dossier <- file.path(racine, "7. Typologies")
@@ -72,7 +74,7 @@ for (nom in names(classer)) {
   message(nom, " : ", round(100 * sum(gain[1:3]) / sum(h$call$t$res$eig[, 1]), 1),
           " % de l'inertie des trois axes")
 }
-# Service public : 49 %. Gestes : 54 %.
+# Service public : 51 %. Gestes : 56 %.
 
 ### Les noms des classes
 
@@ -134,7 +136,7 @@ descriptions |>
 write_csv2(descriptions, file.path(dossier, "01_description_classes.csv"))
 
 # Lecture, service public :
-#   1. Monopole public national (27 %) : monopole, gestion centralisée, sans
+#   1. Monopole public national (28 %) : monopole, gestion centralisée, sans
 #      profit, défini par l'organisme public, même service partout, l'État
 #      garant et pas les entreprises privées ;
 #   2. État garant, mais concurrence (30 %) : l'État garant mais ni les
@@ -143,7 +145,7 @@ write_csv2(descriptions, file.path(dossier, "01_description_classes.csv"))
 #   3. Service public élargi (26 %) : les entreprises publiques et les
 #      collectivités garantes avec l'État, accès et égalité, "les deux" pour la
 #      définition, positions médianes sur la gestion et la concurrence ;
-#   4. En dehors de l'État (17 %) : l'État n'est pas cité comme garant (76 %
+#   4. En dehors de l'État (16 %) : l'État n'est pas cité comme garant (77 %
 #      contre 17 % en moyenne), au profit des individus et des entreprises
 #      privées ; gestion décentralisée, concurrence.
 #
@@ -349,19 +351,19 @@ for (typo in unique(tableau_positions$Typologie)) {
 #     le revenu et le statut n'y sont pas liés. Ce sont des opinions, pas des
 #     positions sociales ;
 #   - les rapports aux gestes, eux, le sont : le statut d'occupation (V = 0.30),
-#     l'intérêt (0.15), la zone (0.14) et l'âge (0.11). Être "non concerné" ou
+#     l'intérêt (0.15), la zone (0.14) et l'âge (0.12). Être "non concerné" ou
 #     "déjà engagé" dépend d'abord du logement qu'on occupe ;
-#   - les deux typologies sont indépendantes (V = 0.03, p = 0.52) : chaque
+#   - les deux typologies sont indépendantes (V = 0.04, p = 0.25) : chaque
 #     conception du service public compte la même proportion de réfractaires,
 #     de prêts à faire, etc. ;
 #   - avec la transition, les conceptions du service public ne se distinguent
 #     que sur ce qui touche à l'État : l'investissement public est jugé
 #     acceptable par 69-70 % des classes "monopole" et "élargi", contre 51-52 %
-#     des deux autres (p < 0.001). Aucune différence sur le nucléaire (p = 0.18).
+#     des deux autres (p < 0.001). Aucune différence sur le nucléaire (p = 0.26).
 #     La classe "en dehors de l'État" souscrit plus souvent une offre verte
 #     (24 % contre 15 % pour le monopole public) ;
-#   - les réfractaires aux gestes sont les plus pro-nucléaires (55 contre 42 à
-#     52), les moins favorables au malus (12 % contre 22 à 27 %) et les moins
+#   - les réfractaires aux gestes sont les plus pro-nucléaires (55 contre 43 à
+#     52), les moins favorables au malus (12 % contre 22 à 26 %) et les moins
 #     prêts à payer pour une offre verte. On retrouve l'axe nucléaire / sobriété
 #     du script 5e, du côté des pratiques.
 

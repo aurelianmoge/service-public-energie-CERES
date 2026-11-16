@@ -29,7 +29,9 @@ library(factoextra)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/2. Transition"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
@@ -42,8 +44,8 @@ etiqueter <- function(x, nom) {
 # On garde les répondants qui ont donné au moins un premier choix dans les deux
 # classements (ceux qui ont répondu "Ne sait pas" en premier rang sont exclus).
 classe <- !is.na(df$lev_nucleaire) & !is.na(df$prod_nucleaire)
-sum(classe)   # 2864 répondants
-sum(!classe)  # 395 exclus
+sum(classe)   # 2806 répondants
+sum(!classe)  # 379 exclus
 tr <- df[classe, ]
 
 
@@ -59,7 +61,7 @@ actives <- tr |>
 # On regarde les moyennes pondérées des points
 round(sapply(actives, weighted.mean, w = tr$poids_norm), 2)
 # Leviers : l'efficacité vient en tête (2.80), le nucléaire est dans la moyenne
-# (2.19). Productions : solaire (1.56) et nucléaire (1.48) devant l'hydraulique.
+# (2.21). Productions : solaire (1.55) et nucléaire (1.49) devant l'hydraulique.
 
 
 ####################################
@@ -114,7 +116,7 @@ inertie <- data.frame(axe = 1:6,
                       valeur_propre = round(acp$eig[1:6, 1], 3),
                       inertie       = round(acp$eig[1:6, 2], 1))
 inertie
-# Axe 1 : 25.6 %, nettement au-dessus des suivants (11.9, 11.0, 10.7, 9.9) :
+# Axe 1 : 25.6 %, nettement au-dessus des suivants (11.9, 10.9, 10.8, 9.9) :
 # un seul axe se détache vraiment.
 
 write_csv2(inertie, file.path(dossier, "01_inertie.csv"))
@@ -179,8 +181,8 @@ eta2
 write_csv2(eta2, file.path(dossier, "03_eta2_illustratives.csv"))
 
 # Contrairement aux conceptions du service public (script 5a, eta² < 0.012),
-# l'axe nucléaire / renouvelables est socialement structuré : l'âge (0.054), le
-# sexe (0.052), l'activité et l'intérêt pour la transition y pèsent cinq fois
+# l'axe nucléaire / renouvelables est socialement structuré : l'âge (0.050), le
+# sexe (0.048), l'activité et l'intérêt pour la transition y pèsent cinq fois
 # plus. Les hommes, les 65 ans et plus, les retraités, les propriétaires et ceux
 # qui connaissent les acteurs du réseau sont du côté du nucléaire ; les femmes,
 # les 18-34 ans, les revenus modestes et ceux qui acceptent bonus et malus, du

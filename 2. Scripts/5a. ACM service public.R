@@ -5,7 +5,7 @@
 # comment le système doit être organisé.
 #
 # Toutes ces questions ont été posées à tout le monde : l'analyse porte donc sur
-# l'ensemble des 3259 répondants redressés, et pas seulement sur les longs.
+# l'ensemble des 3185 répondants du champ commun, et pas seulement sur les longs.
 #
 # Choix de méthode :
 #   - ACM "spécifique" : les "Ne sait pas" restent dans l'analyse mais sont
@@ -31,7 +31,9 @@ library(factoextra)
 ###############################
 
 # Les données recodées par le script 3
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/1. Service public"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)

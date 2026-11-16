@@ -27,7 +27,9 @@ library(factoextra)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/3. Gestes"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
@@ -38,7 +40,7 @@ etiqueter <- function(x, nom) {
 }
 
 longs <- df |> filter(long)
-nrow(longs)  # 2821
+nrow(longs)  # 2770
 
 
 ####################################
@@ -120,7 +122,7 @@ inertie <- data.frame(
   taux_benzecri  = round(100 * taux_modifies / sum(taux_modifies), 1)
 )
 inertie
-# Deux axes presque à égalité (45 % et 40 % en taux modifiés), puis un troisième
+# Deux axes presque à égalité (45 % et 39 % en taux modifiés), puis un troisième
 # (13 %) : on interprète les trois.
 
 write_csv2(inertie, file.path(dossier, "01_inertie.csv"))
@@ -153,7 +155,7 @@ write_csv2(lecture_axes, file.path(dossier, "02_contributions_modalites.csv"))
 #   - axe 1 (45 % en taux modifiés) : le refus. Toutes les modalités "Pas prêt"
 #     se rassemblent d'un côté, quel que soit le geste. Ce n'est pas un geste
 #     particulier qu'on refuse, c'est une disposition générale.
-#   - axe 2 (40 %) : la capacité d'agir. Les "Non concerné" (gros équipement,
+#   - axe 2 (39 %) : la capacité d'agir. Les "Non concerné" (gros équipement,
 #     production, isolation, petits équipements) s'opposent aux investissements
 #     faits ou envisagés.
 #   - axe 3 (13 %) : l'intention contre la réalisation. "Prêt à faire" d'un
@@ -194,12 +196,12 @@ write_csv2(eta2, file.path(dossier, "03_eta2_illustratives.csv"))
 
 # Trois logiques différentes :
 #   - le refus (axe 1) n'est presque pas social (eta² < 0.01) : il est surtout
-#     lié au faible intérêt pour l'énergie (0.039) ;
+#     lié au faible intérêt pour l'énergie (0.046) ;
 #   - la capacité d'agir (axe 2) est très structurée par la condition matérielle :
-#     le statut d'occupation (0.174) et le type de logement (0.134). Les
+#     le statut d'occupation (0.184) et le type de logement (0.138). Les
 #     locataires, en appartement, en ville, sont "non concernés" ;
 #   - l'intention contre la réalisation (axe 3) suit le cycle de vie : l'âge
-#     (0.058) et l'activité (0.044). Les 18-34 ans sont "prêts", les retraités
+#     (0.058) et l'activité (0.045). Les 18-34 ans sont "prêts", les retraités
 #     et les propriétaires ont "déjà fait".
 
 vtests <- as.data.frame(acm$quali.sup$v.test[, 1:3]) |>

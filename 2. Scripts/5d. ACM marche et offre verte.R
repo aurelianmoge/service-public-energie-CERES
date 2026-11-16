@@ -24,7 +24,9 @@ library(factoextra)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/4. Marché et offre verte"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
@@ -59,7 +61,7 @@ actives <- data.frame(
 
 summary(actives, maxsum = 8)
 
-# "Offre verte auprès de : Autre/NSP" regroupe surtout des NSP (1094 sur 1145) :
+# "Offre verte auprès de : Autre/NSP" regroupe surtout des NSP (1069 sur 1119) :
 # on le traite aussi comme passif.
 
 
@@ -144,12 +146,12 @@ lecture_axes |> mutate(across(where(is.numeric), ~ round(.x, 2))) |> print(n = 4
 write_csv2(lecture_axes, file.path(dossier, "02_contributions_modalites.csv"))
 
 # Lecture :
-#   - axe 1 (74 % en taux modifiés) : l'entrée dans le marché. D'un côté, l'offre
+#   - axe 1 (75 % en taux modifiés) : l'entrée dans le marché. D'un côté, l'offre
 #     verte souscrite, un fournisseur alternatif, des changements fréquents de
 #     fournisseur, une préférence pour une coopérative et la disposition à payer
 #     plus. De l'autre, EDF, aucun changement de fournisseur et le scepticisme
 #     envers les offres vertes. Un seul axe domine nettement.
-#   - axe 2 (16 %) : la confiance. Le scepticisme, TotalEnergies et le refus de
+#   - axe 2 (15 %) : la confiance. Le scepticisme, TotalEnergies et le refus de
 #     payer plus s'opposent au porteur local de confiance et à EDF.
 
 
@@ -180,10 +182,10 @@ eta2
 write_csv2(eta2, file.path(dossier, "03_eta2_illustratives.csv"))
 
 # L'entrée dans le marché (axe 1) est modérément sociale : l'âge (0.032), le
-# diplôme (0.027) et l'intérêt pour l'énergie (0.023). Les jeunes, les diplômés
+# diplôme (0.027) et l'intérêt pour l'énergie (0.025). Les jeunes, les diplômés
 # d'un bac+5, les urbains en appartement y entrent ; les retraités et les 65 ans
 # et plus restent chez EDF. La confiance (axe 2) suit surtout l'intérêt pour
-# l'énergie (0.040) et le diplôme (0.025).
+# l'énergie (0.037) et le diplôme (0.022).
 
 vtests <- as.data.frame(acm$quali.sup$v.test[, 1:3]) |>
   rownames_to_column("modalite")

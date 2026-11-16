@@ -553,6 +553,18 @@ df <- df |>
 summary(df$gestes_part[df$long])
 
 
+### Le champ commun des analyses
+
+# Les régressions du script 7 écartent les 8 répondants qui ont répondu "Autre"
+# au sexe et les 67 dont la zone est inconnue (74 en tout, une personne étant
+# dans les deux cas) : 3185 répondants (2770 longs,
+# 415 courts). Toutes les analyses (scripts 5 à 8) portent sur ce champ, pour
+# que les effectifs et les parts soient les mêmes d'un document à l'autre. Les
+# autres répondants restent dans df, avec leur poids.
+df <- df |> mutate(champ_commun = !is.na(sexe) & !is.na(zone3))
+table(df$champ_commun, df$long)
+
+
 #####################
 ### Sauvegarde    ###
 #####################

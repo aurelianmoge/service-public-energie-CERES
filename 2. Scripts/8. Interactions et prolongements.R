@@ -35,7 +35,9 @@ library(flextable)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Régressions/Prolongements"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)

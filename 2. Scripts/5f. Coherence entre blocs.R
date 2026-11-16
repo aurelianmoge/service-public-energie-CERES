@@ -35,7 +35,9 @@ library(tidyverse)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/6. Cohérence entre blocs"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
@@ -111,12 +113,12 @@ as.data.frame(as.table(correlations)) |>
 ggsave(file.path(dossier, "figure_1_correlations.pdf"), width = 10, height = 8)
 
 # Lecture : les corrélations sont faibles partout, y compris à l'intérieur des
-# blocs (la plus forte, hors classement, est de 0.23 entre décentralisation et
+# blocs (la plus forte, hors classement, est de 0.24 entre décentralisation et
 # concurrence). Le bloc de la gouvernance du service public est isolé : aucune
-# corrélation avec la transition ne dépasse 0.08, sauf "même service partout"
+# corrélation avec la transition ne dépasse 0.09, sauf "même service partout"
 # avec l'investissement public (0.14). Les priorités et les instruments de la
 # transition se répondent davantage : le pro-nucléaire va avec le rejet du malus
-# et du bonus (- 0.13 et - 0.12), les renouvelables avec le bonus (0.16), la
+# et du bonus (- 0.12 et - 0.12), les renouvelables avec le bonus (0.16), la
 # sobriété avec la régulation (0.13).
 
 
@@ -147,11 +149,11 @@ coherence <- function(donnees) {
 
 round(coherence(d), 2)
 
-# Lecture : deux questions d'un même bloc partagent en moyenne 1.75 % de leur
+# Lecture : deux questions d'un même bloc partagent en moyenne 1.76 % de leur
 # variance, deux questions de blocs différents 0.31 %. Entre la gouvernance du
-# service public et la transition, c'est presque rien (0.04 % avec les
+# service public et la transition, c'est presque rien (0.03 % avec les
 # priorités, 0.22 % avec les instruments) ; entre les priorités et les
-# instruments de la transition, c'est 0.91 %.
+# instruments de la transition, c'est 0.89 %.
 # La faible cohérence n'est donc pas propre aux liens entre blocs : même à
 # l'intérieur d'un bloc, les opinions sont peu liées.
 
@@ -236,16 +238,17 @@ write_csv2(paires_diplome, file.path(dossier, "03_paires_selon_diplome.csv"))
 
 # Lecture des sections 3 et 4 :
 #   - à l'intérieur des blocs, la cohérence augmente avec la connaissance du
-#     réseau : de 1.36 % [1.06 ; 1.66] sans acteur connu à 2.26 % [1.73 ; 2.80]
-#     avec les deux. Entre les blocs, elle augmente à peine (de 0.26 à 0.38 %,
-#     intervalles qui se recouvrent). L'intérêt et l'âge ne font pas de
-#     différence nette ;
-#   - le diplôme est le seul facteur net pour les liens entre blocs : 0.68 %
+#     réseau : de 1.34 % [1.01 ; 1.67] sans acteur connu à 2.29 % [1.73 ; 2.85]
+#     avec les deux. Entre les blocs, elle augmente à peine (de 0.25 à 0.38 %,
+#     intervalles qui se recouvrent). L'intérêt ne fait pas de différence
+#     nette, et l'âge ne dessine pas de gradient (seuls les 50-64 ans se
+#     détachent, à 2.54 %) ;
+#   - le diplôme est le seul facteur net pour les liens entre blocs : 0.69 %
 #     chez les bac+5, contre 0.22 % pour les autres diplômes. Ce surcroît vient
 #     des liens entre priorités et instruments de la transition : chez les
 #     bac+5, prioriser les renouvelables va avec le bonus (0.26 contre 0.14), la
-#     sobriété avec la régulation (0.24 contre 0.09), et le pro-nucléaire contre
-#     la régulation (- 0.17 contre - 0.07). Les plus diplômés relient davantage
+#     sobriété avec la régulation (0.25 contre 0.09), et le pro-nucléaire contre
+#     la régulation (- 0.18 contre - 0.07). Les plus diplômés relient davantage
 #     les fins et les moyens de la transition ;
 #   - la gouvernance du service public reste isolée dans tous les groupes, y
 #     compris chez les plus diplômés et les plus informés.

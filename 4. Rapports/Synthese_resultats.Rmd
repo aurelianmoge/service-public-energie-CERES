@@ -69,7 +69,9 @@ ordre_affichage <- c("18-34", "35-49", "50-64", "65+",
 ```{r importation, include=FALSE}
 ### L'échantillon redressé
 
-df <- readRDS(file.path(sorties, "df_recode.rds"))
+# Le champ commun de toutes les analyses : les 3185 répondants dont le sexe et la
+# zone sont connus (script 3)
+df <- readRDS(file.path(sorties, "df_recode.rds")) |> filter(champ_commun)
 taille_effective <- sum(df$poids)^2 / sum(df$poids^2)
 part_rural <- 100 * weighted.mean(df$zone2 == "Rural", df$poids, na.rm = TRUE)
 
@@ -280,7 +282,7 @@ graphique_interaction <- function(k, etiquette_groupe = identity, axe_y = NULL) 
 <p class="chapeau">Une large majorité attend de l'État qu'il garantisse l'accès à l'électricité et le même service partout. Mais ces opinions sur le service public ne sont ni rattachées au profil social, ni reliées aux choix de transition : elles forment un domaine à part. La seule opinion fortement structurée est le nucléaire, et elle l'est d'abord par le sexe, sans que l'écart de connaissance du système l'explique.</p>
 
 <div class="chiffres">
-<div class="chiffre"><b>`r nombre(nrow(df))`</b><span>répondants redressés (âge × sexe × zone)</span></div>
+<div class="chiffre"><b>`r nombre(nrow(df))`</b><span>répondants redressés (âge × sexe × zone), dont le sexe et la zone sont connus</span></div>
 <div class="chiffre"><b>`r nombre(sum(df$long))`</b><span>questionnaires longs (contrat à leur nom)</span></div>
 <div class="chiffre"><b>`r nombre(taille_effective)`</b><span>taille d'échantillon effective après pondération</span></div>
 <div class="chiffre"><b>`r pct(part_rural, 1)`</b><span>de ruraux, cible corrigée de la perception</span></div>

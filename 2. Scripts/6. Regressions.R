@@ -50,7 +50,9 @@ library(survey)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 # Les deux axes principaux des analyses factorielles : le pôle "marché" du
 # service public (script 5a) et l'axe nucléaire (script 5b). On inverse l'axe de

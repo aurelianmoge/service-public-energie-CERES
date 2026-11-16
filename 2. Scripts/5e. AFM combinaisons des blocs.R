@@ -38,7 +38,9 @@ library(factoextra)
 ### Importation des données ###
 ###############################
 
-df <- readRDS("3. Outputs/df_recode.rds")
+# Le champ commun à toutes les analyses (comme dans le script 7) : les 3185
+# répondants dont le sexe (homme ou femme) et la zone sont connus
+df <- readRDS("3. Outputs/df_recode.rds") |> filter(champ_commun)
 
 dossier <- "3. Outputs/Analyses factorielles/5. AFM combinées"
 dir.create(dossier, recursive = TRUE, showWarnings = FALSE)
@@ -121,7 +123,7 @@ contributions_A
 write_csv2(as.data.frame(contributions_A) |> rownames_to_column("groupe"),
            file.path(dossier, "A_02_contributions_groupes.csv"))
 
-# L'axe 1 est fait par la transition (leviers et productions, 86 %) : c'est
+# L'axe 1 est fait par la transition (leviers et productions, 87 %) : c'est
 # l'axe nucléaire / renouvelables du script 5b. L'axe 2 est fait par le service
 # public (garants 50 %, organisation 34 %) : c'est l'axe "public et national"
 # contre "marché" du script 5a. Aucun axe ne mêle les deux blocs : l'AFM les
@@ -214,7 +216,7 @@ write_csv2(as.data.frame(round(correlations, 3)) |> rownames_to_column("axe"),
 #     renouvelables et disposition à payer pour une offre verte (0.28) ;
 #   - la connaissance du réseau va avec le nucléaire (tr_axe1 : -0.17) ;
 #   - le refus des gestes va avec le nucléaire (-0.13) et le faible intérêt
-#     pour l'énergie (-0.22) ;
+#     pour l'énergie (-0.24) ;
 #   - les tenants du "marché" dans le service public entrent un peu plus dans le
 #     marché (sp_axe1 / marche_axe1 : 0.14), mais cette cohérence reste faible.
 # Il n'y a donc pas de "vision du monde" énergétique unifiée : on a plusieurs
