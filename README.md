@@ -1,5 +1,4 @@
 Ce dépôt GitHub s'inscrit dans le cadre du projet de recherche sur "les évolutions du service public de l'énergie" en France, porté par le CERES sous la direction de Marc Fleurbaey et Noé Kabouche.
-<<<<<<< HEAD
 Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 3 000 individus) à propos de leur rapport au service public de l'électricité.
 
 ## Les données
@@ -27,18 +26,22 @@ Tous les scripts se lancent depuis la racine du projet (ouvrir le `.Rproj` dans 
 | `5c. ACM gestes.R` | Les neuf gestes de maîtrise de l'énergie | Longs |
 | `5d. ACM marche et offre verte.R` | Fournisseur, offre verte, autoconsommation | Longs |
 | `5e. AFM combinaisons des blocs.R` | Les blocs sont-ils liés entre eux ? (RV, AFM, corrélations entre axes) | |
+| `5f. Coherence entre blocs.R` | Cohérence des opinions question par question, selon la connaissance, l'intérêt, le diplôme et l'âge | Tous |
+| `5g. Typologies.R` | Quatre conceptions du service public et quatre rapports aux gestes (CAH sur les ACM 5a et 5c), profils et croisements | Tous / longs |
 | `6. Regressions.R` | Modèles emboîtés, décomposition du R² (Shapley), robustesse, focus nucléaire | |
 | `7. Scores et regressions.R` | Indicateurs et régressions d'Antoine, conservés tels quels | |
+| `8. Interactions et prolongements.R` | Cinq interactions en valeurs prédites, décomposition de l'écart de genre sur le nucléaire, gestes en logit fractionnaire, tableaux Word et LaTeX | |
+| `9. Tout relancer et synthese.R` | Relance 3, 5a à 5g, 6 et 8 dans l'ordre, puis tricote la synthèse (`4. Rapports/Synthese_resultats.Rmd`) en version complète et en version en ligne | |
 
-L'ordre d'exécution est : `3. Recodages.R` (qui lance lui-même le redressement), puis `5a` à `5e`,
-puis `6`. Les scripts 2 et 4 n'ont pas à être lancés seuls. Le script 7 est indépendant : il
+L'ordre d'exécution est : `3. Recodages.R` (qui lance lui-même le redressement), puis `5a` à `5g`,
+puis `6` et `8`. Les scripts 2 et 4 n'ont pas à être lancés seuls. Le script 7 est indépendant : il
 relance le redressement s'il ne trouve pas `df`, et écrit dans `3. Outputs/Regressions`
 (sans accent), à ne pas confondre avec `3. Outputs/Régressions` (script 6).
 
 Les sorties de chaque analyse factorielle sont dans `3. Outputs/Analyses factorielles/`, celles des
-régressions dans `3. Outputs/Régressions/`.
+régressions dans `3. Outputs/Régressions/` (et `Régressions/Prolongements/` pour le script 8).
 
-Packages : `tidyverse`, `openxlsx`, `survey`, `FactoMineR`, `factoextra`, `knitr`.
+Packages : `tidyverse`, `openxlsx`, `survey`, `FactoMineR`, `factoextra`, `knitr`, et pour le script 8 `marginaleffects`, `modelsummary`, `flextable`.
 
 ## Les archives
 
@@ -46,6 +49,3 @@ Les anciens scripts sont dans `2. Scripts/Annexes` (dont le diagnostic géograph
 `3. Variable geographie.R`, et l'ancienne AFM avec sa CAH), les anciens rapports et dashboards dans
 `4. Rapports/Archives`, et les anciennes sorties dans `3. Outputs/Archives`. Ces scripts ne sont plus
 maintenus : leurs chemins ne fonctionnent plus depuis le dossier `Annexes`.
-=======
-Il recense les codes rédigés pour analyser les données tirées d'une enquête quantitative. Cette enquête a été réalisée auprès d'un échantillon représentatif de la population française (d'environ 2 000 individus) à propos de leur rapport au service public de l'électricité.
->>>>>>> 8d25b4bb1f34614713c1c19bbd31941855a04224
