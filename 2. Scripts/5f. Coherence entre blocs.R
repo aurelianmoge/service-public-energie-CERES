@@ -77,7 +77,7 @@ d <- df |>
          diplome_3 = fct_collapse(diplome, "Bac ou moins" = c("Infra-bac", "Bac")),
          diplome_3 = factor(na_if(as.character(diplome_3), "Autre/NSP"),
                             levels = c("Bac ou moins", "Bac+2/3", "Bac+5")))
-nrow(d)  # 2196
+nrow(d)  # 2154
 
 
 #######################################

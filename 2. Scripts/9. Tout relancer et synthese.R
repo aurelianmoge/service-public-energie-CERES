@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Relancer toute l'analyse et produire la synthèse des résultats
 #
 # Ce script ne fait aucun calcul lui-même : il lance les scripts dans l'ordre,
@@ -16,10 +15,9 @@
 # n'utilise pas ses sorties. Les scripts 1, 2 et 4 sont lancés par le script 3.
 #
 # À lancer depuis la racine du projet (ouvrir le .Rproj dans RStudio). Compter
-# deux à trois minutes.
+# une dizaine de minutes (les bootstraps du script 8 et les forêts aléatoires du
+# script 13 sont les plus longs).
 
-=======
->>>>>>> 3c22a59c115aff3e9e65e192e7076f926ccec263
 
 #################################
 ### Les scripts, dans l'ordre ###
@@ -35,6 +33,9 @@ scripts <- c("3. Recodages.R",
              "5g. Typologies.R",
              "6. Regressions.R",
              "8. Interactions et prolongements.R",
+             "11. Gestes et autoconsommation.R",
+             "12. Gouts et degouts.R",
+             "13. Robustesse et capacite predictive.R",
              "10. Tableaux LaTeX.R")
 
 for (s in scripts) {

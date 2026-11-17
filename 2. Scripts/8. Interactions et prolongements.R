@@ -8,7 +8,9 @@
 #      parce qu'elles sortent significatives), présentées par des valeurs
 #      prédites plutôt que par des coefficients croisés ;
 #   2. L'écart entre femmes et hommes sur le nucléaire : quelle part passe par
-#      la connaissance, l'intérêt et la conception du service public ?
+#      la connaissance, l'intérêt et la conception du service public ? Puis deux
+#      autres explications : les "ne sait pas", et la division des tâches dans
+#      le foyer ;
 #   3. La part des gestes faits en logit fractionnaire, mieux adapté à une
 #      proportion que les MCO du script 6 ;
 #   4. Les tableaux (Word et LaTeX) et les figures à présenter.
@@ -243,13 +245,13 @@ mediateurs <- c(conn_reseau     = "Connaissance du réseau",
                 def_mission     = "SP défini par la mission")
 base <- c("vague", profil, vie)
 
-set.seed(2026)
-tirages <- list()
-
-for (y in c("pro_nucleaire_pts", "nucleaire_premier_pts")) {
-  d <- df |> drop_na(all_of(c(y, base, names(mediateurs))))
-
-  # Le tirage 0 est l'échantillon lui-même, les suivants sont les bootstraps
+# La décomposition, avec ses intervalles bootstrap, pour une position y et une
+# liste de variables ajoutées. Le tirage 0 est l'échantillon lui-même, les
+# suivants sont les bootstraps. On s'en resservira plus bas pour la décision
+# dans le foyer.
+gelbach <- function(donnees, y, mediateurs) {
+  d <- donnees |> drop_na(all_of(c(y, base, names(mediateurs))))
+  tirages <- list()
   for (b in 0:500) {
     d_b <- if (b == 0) d else d[sample(nrow(d), replace = TRUE), ]
 
@@ -263,20 +265,23 @@ for (y in c("pro_nucleaire_pts", "nucleaire_premier_pts")) {
       coef(lm(reformulate(base, m), data = d_b, weights = poids_norm))["sexeFemme"] * coef(complet)[m]
     })
 
-    tirages[[paste(y, b)]] <- tibble(position = y, tirage = b,
-                                     terme  = c("Écart à profil égal", mediateurs, "Écart restant"),
-                                     valeur = c(ecart_base, parts, ecart_complet))
+    tirages[[b + 1]] <- tibble(position = y, n = nrow(d), tirage = b,
+                               terme  = c("Écart à profil égal", mediateurs, "Écart restant"),
+                               valeur = c(ecart_base, parts, ecart_complet))
   }
+  bind_rows(tirages) |>
+    group_by(position, n, terme) |>
+    summarise(estimation = valeur[tirage == 0],
+              ic_bas     = quantile(valeur[tirage > 0], 0.025),
+              ic_haut    = quantile(valeur[tirage > 0], 0.975),
+              .groups = "drop") |>
+    mutate(terme = factor(terme, levels = c("Écart à profil égal", mediateurs, "Écart restant"))) |>
+    arrange(terme)
 }
 
-decomposition <- bind_rows(tirages) |>
-  group_by(position, terme) |>
-  summarise(estimation = valeur[tirage == 0],
-            ic_bas     = quantile(valeur[tirage > 0], 0.025),
-            ic_haut    = quantile(valeur[tirage > 0], 0.975),
-            .groups = "drop") |>
-  mutate(terme = factor(terme, levels = c("Écart à profil égal", mediateurs, "Écart restant"))) |>
-  arrange(position, terme)
+set.seed(2026)
+decomposition <- bind_rows(gelbach(df, "pro_nucleaire_pts", mediateurs),
+                           gelbach(df, "nucleaire_premier_pts", mediateurs))
 
 decomposition |> mutate(across(where(is.numeric), ~ round(.x, 1))) |> print(n = Inf)
 write_csv2(decomposition, file.path(dossier, "04_decomposition_ecart_genre.csv"))
@@ -318,6 +323,98 @@ ggsave(file.path(dossier, "figure_6_decomposition_ecart_genre.pdf"), width = 9, 
 # points). L'écart de genre sur le nucléaire n'est donc pas un écart de
 # connaissance du système : plus de 90 % demeure à connaissance égale. Il tient à
 # autre chose (perception du risque, valeurs), que l'enquête ne mesure pas.
+
+### Et les "ne sait pas" ?
+
+# Les femmes répondent plus souvent "ne sait pas" sur le nucléaire (+ 9,1 points
+# à profil égal, chez Antoine), et sortent alors des modèles. On classe chaque
+# répondant selon la première production qu'il cite : le nucléaire, une autre
+# production, ou "ne sait pas". Un modèle par issue, avec les contrôles de M2 :
+# les trois écarts femmes - hommes somment à zéro, et disent où se reporte ce que
+# les femmes ne donnent pas au nucléaire.
+df <- df |>
+  mutate(issue = case_when(is.na(prod_nucleaire) ~ "nsp",
+                           prod_nucleaire == 3   ~ "nucleaire",
+                           TRUE                  ~ "autre"),
+         premier_nucleaire = 100 * (issue == "nucleaire"),
+         premier_autre     = 100 * (issue == "autre"),
+         premier_nsp       = 100 * (issue == "nsp"))
+
+# L'écart femmes - hommes sur une variable, à profil égal (contrôles de M2)
+ecart_femmes <- function(y, donnees) {
+  d <- donnees |> drop_na(all_of(c(y, base)))
+  plan <- svydesign(ids = ~1, weights = ~poids_norm, data = d)
+  coefs <- summary(svyglm(reformulate(base, y), design = plan))$coefficients
+  tibble(variable = y, n = nrow(d),
+         hommes = weighted.mean(d[[y]][d$sexe == "Homme"], d$poids_norm[d$sexe == "Homme"]),
+         femmes = weighted.mean(d[[y]][d$sexe == "Femme"], d$poids_norm[d$sexe == "Femme"]),
+         ecart = coefs["sexeFemme", 1], se = coefs["sexeFemme", 2], p = coefs["sexeFemme", 4])
+}
+
+issues <- map_dfr(c("premier_nucleaire", "premier_autre", "premier_nsp"), ecart_femmes, donnees = df)
+issues
+write_csv2(issues, file.path(dossier, "06_premiere_production_et_nsp.csv"))
+
+# On ne sait pas ce que penseraient les "ne sait pas". On encadre donc l'écart
+# sur le score en leur attribuant tour à tour le score le plus bas (0), un score
+# moyen (50) et le plus haut (100). Comme les femmes sont plus nombreuses parmi
+# eux, ces hypothèses déplacent l'écart : c'est sa marge d'incertitude.
+bornes <- map_dfr(c(0, 50, 100), function(valeur) {
+  donnees <- df |> mutate(score_impute = coalesce(pro_nucleaire_pts, valeur))
+  ecart_femmes("score_impute", donnees) |> mutate(score_des_nsp = valeur)
+})
+bornes <- bind_rows(ecart_femmes("pro_nucleaire_pts", df) |> mutate(score_des_nsp = NA), bornes)
+bornes
+write_csv2(bornes, file.path(dossier, "07_bornes_nsp.csv"))
+
+# Lecture : à profil égal, les femmes mettent le nucléaire en premier 23,7
+# points moins souvent que les hommes. Ces points se reportent pour 15,7 sur une
+# autre production et pour 8,0 sur "ne sait pas" : un tiers de l'écart sur le
+# premier choix est un écart dans le fait d'avoir une opinion. L'écart sur le
+# score résiste pourtant à toutes les hypothèses : - 19,3 points en excluant les
+# "ne sait pas", - 21,3 s'ils étaient tous opposés au nucléaire, - 16,7 s'ils
+# étaient au milieu, et encore - 12,2 s'ils étaient tous très favorables.
+
+### Et la division des tâches dans le foyer ?
+
+# Qui choisit et compare les offres d'énergie dans le foyer (G5Q00001, posée aux
+# titulaires d'un contrat) ? On regroupe "votre conjoint·e" et "une autre
+# personne" ; les 19 "ne sait pas" sont laissés de côté. Attention : "vous"
+# regroupe ceux qui vivent seuls et ceux qui décident pour le couple, que
+# l'enquête ne distingue pas.
+longs <- df |>
+  filter(long) |>
+  mutate(decision = case_when(G5Q00001 == "Vous"              ~ "Vous",
+                              G5Q00001 == "Décision partagée" ~ "Partagée",
+                              G5Q00001 %in% c("Votre conjoint·e", "Une autre personne") ~ "Quelqu'un d'autre"),
+         decide_seul  = 100 * (decision == "Vous"),
+         decide_autre = 100 * (decision == "Quelqu'un d'autre"),
+         partage      = as.numeric(decision == "Partagée"),
+         autre        = as.numeric(decision == "Quelqu'un d'autre"))
+
+decision <- map_dfr(c("decide_seul", "decide_autre"), ecart_femmes, donnees = longs)
+decision
+write_csv2(decision, file.path(dossier, "08_decision_dans_le_foyer.csv"))
+
+# La même décomposition, chez les titulaires d'un contrat : quelle part de
+# l'écart de connaissance, puis de l'écart sur le nucléaire, passe par la
+# décision dans le foyer ?
+set.seed(2026)
+decomposition_foyer <- bind_rows(
+  gelbach(longs, "conn_reseau", c(partage = "Décision partagée", autre = "Quelqu'un d'autre décide")),
+  gelbach(longs, "pro_nucleaire_pts", c(partage = "Décision partagée", autre = "Quelqu'un d'autre décide",
+                                        conn_reseau = "Connaissance du réseau",
+                                        interet_energie = "Intérêt pour l'énergie")))
+decomposition_foyer |> mutate(across(where(is.numeric), ~ round(.x, 2))) |> print(n = Inf)
+write_csv2(decomposition_foyer, file.path(dossier, "09_decomposition_foyer.csv"))
+
+# Lecture : les femmes laissent plus souvent la décision à quelqu'un d'autre
+# (10,9 % contre 4,3 % des hommes, + 6,5 points à profil égal). Mais ce partage
+# des rôles n'explique presque rien : 0,01 bonne réponse sur les 0,42 de l'écart
+# de connaissance, et rien sur le nucléaire, où il reste 18,0 points sur 19,2.
+# L'écart de genre sur le nucléaire ne passe donc ni par la connaissance, ni par
+# le rôle dans le foyer, ni par le fait d'avoir une opinion : il tient à ce que
+# l'enquête ne mesure pas.
 
 
 #################################################
@@ -528,7 +625,8 @@ ggsave(file.path(dossier, "figure_7_coefficients.pdf"), width = 13, height = 7)
 
 saveRDS(list(interactions = interactions, modeles_interaction = modeles_interaction,
              tests_interaction = tests_interaction, predites = predites, ecarts = ecarts,
-             decomposition = decomposition, gestes_comparaison = gestes_comparaison,
+             decomposition = decomposition, issues = issues, bornes = bornes, decision = decision,
+             decomposition_foyer = decomposition_foyer, gestes_comparaison = gestes_comparaison,
              modeles_tableau = modeles_tableau, coefficients_tableau = coefficients_tableau,
              r2_tableau = r2_tableau),
         file.path(dossier, "resultats_prolongements.rds"))

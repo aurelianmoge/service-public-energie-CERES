@@ -1,10 +1,11 @@
-# Les tableaux LaTeX des analyses factorielles, des typologies et des
-# prolongements des régressions, au format du document Overleaf d'Antoine
+# Les tableaux LaTeX des analyses factorielles, des typologies, des pratiques,
+# des prolongements des régressions et de la robustesse, au format du document
+# Overleaf d'Antoine
 #
 # Ce script ne refait aucune analyse : il relit les sorties enregistrées par les
-# scripts 5a à 5g, 6 et 8 dans "3. Outputs", et les met en forme avec les
-# fonctions du script 0. Il faut donc avoir lancé ces scripts avant (le script 9
-# les relance tous).
+# scripts 5a à 5g, 6, 8, 11, 12 et 13 dans "3. Outputs", et les met en forme
+# avec les fonctions du script 0. Il faut donc avoir lancé ces scripts avant (le
+# script 9 les relance tous).
 #
 # Les tableaux sont écrits dans "5. Overleaf/tableaux Aurélian", un fichier .tex
 # par tableau.
@@ -724,6 +725,343 @@ ecrire_tableau(
     "d'une variable est l'écart entre femmes et hommes sur cette variable, à profil égal, multipliée par son",
     "coefficient dans le modèle complet ; les parts somment exactement à la différence des deux écarts.",
     "Intervalles à 95~\\% par bootstrap (500 tirages), en dessous."
+  )
+)
+
+### Tableau : l'écart de genre, les "ne sait pas" et le foyer
+
+issues   <- lire(reg, "Prolongements", "06_premiere_production_et_nsp.csv")
+bornes   <- lire(reg, "Prolongements", "07_bornes_nsp.csv")
+decision <- lire(reg, "Prolongements", "08_decision_dans_le_foyer.csv")
+
+# Deux lignes par variable : les parts des hommes et des femmes et l'écart à
+# profil égal, puis l'écart-type de cet écart
+lignes_ecart <- function(libelle, x) {
+  c(ligne(retrait(libelle), nombre(x$hommes, 1), nombre(x$femmes, 1), coefficient(x$ecart, x$p, 1)),
+    ligne("", "", "", ecart_type(x$se, 1)))
+}
+ecrire_tableau(
+  tex("reg_genre_nsp"),
+  titre = "L'écart de genre sur le nucléaire, les \\og ne sait pas\\fg{} et le foyer",
+  etiquette = "reg_genre_nsp",
+  colonnes = "l*{3}{c}",
+  entete = ligne("", "Hommes", "Femmes", "Écart à profil égal"),
+  corps = c(groupe("\\textbf{A.} Première production citée (\\%)", 4),
+            lignes_ecart("Le nucléaire", issues[1, ]),
+            lignes_ecart("Une autre production", issues[2, ]),
+            lignes_ecart("Ne sait pas", issues[3, ]),
+            espace("4pt"),
+            groupe("\\textbf{B.} Score pro-nucléaire (0-100), si les \\og ne sait pas\\fg{}\\ldots", 4),
+            lignes_ecart("sont exclus", bornes[1, ]),
+            lignes_ecart("avaient tous le score le plus bas (0)", bornes[2, ]),
+            lignes_ecart("avaient tous un score moyen (50)", bornes[3, ]),
+            lignes_ecart("avaient tous le score le plus haut (100)", bornes[4, ]),
+            espace("4pt"),
+            groupe("\\textbf{C.} Qui choisit les offres d'énergie du foyer (\\%)", 4),
+            lignes_ecart("Le répondant seul", decision[1, ]),
+            lignes_ecart("Quelqu'un d'autre", decision[2, ])),
+  note = paste(
+    "Parts et scores moyens pondérés ; écart entre femmes et hommes à profil égal (contrôles du bloc A2),",
+    "moindres carrés pondérés, écarts-types entre parenthèses. A : les trois écarts somment à zéro. B : on",
+    "attribue aux \\og ne sait pas\\fg{} un score fictif, pour encadrer l'écart. C : titulaires d'un contrat ;",
+    "\\og quelqu'un d'autre\\fg{} regroupe le conjoint et une autre personne, \\og le répondant seul\\fg{}",
+    "mêle ceux qui vivent seuls et ceux qui décident pour le couple.", LEGENDE_ETOILES
+  )
+)
+
+
+######################################################
+### 6. Les pratiques : contraintes et dispositions ###
+######################################################
+
+pratiques <- file.path(sorties, "Gestes et autoconsommation")
+
+### Tableau : les réponses aux gestes selon le statut
+
+noms_gestes <- c(geste_voiture = "Limiter la voiture", geste_chauffage = "Baisser le chauffage",
+                 geste_heures_creuses = "Heures creuses", geste_suivi_conso = "Suivre sa consommation",
+                 geste_information = "S'informer", geste_petits_equipements = "Petits équipements",
+                 geste_gros_equipement = "Gros équipement", geste_isolation = "Isoler",
+                 geste_production = "Produire son énergie")
+reponses_statut <- lire(pratiques, "01_reponses_selon_statut.csv")
+modalites_gestes <- c("Fait", "Prêt", "Pas prêt", "Non concerné")
+lignes_gestes <- function(famille_g) {
+  map_chr(names(noms_gestes)[map_lgl(names(noms_gestes), ~ any(reponses_statut$geste == .x & reponses_statut$famille == famille_g))],
+          function(v) {
+            prop <- reponses_statut |> filter(geste == v, statut == "Propriétaire")
+            loc  <- reponses_statut |> filter(geste == v, statut == "Locataire")
+            ligne(retrait(noms_gestes[[v]]), nombre(unlist(prop[modalites_gestes]), 0),
+                  nombre(unlist(loc[modalites_gestes]), 0))
+          })
+}
+ecrire_tableau(
+  tex("pratiques_reponses"),
+  titre = "Les réponses aux gestes, chez les propriétaires et les locataires",
+  etiquette = "pratiques_reponses",
+  colonnes = "l*{8}{c}",
+  espacement = "4pt",
+  entete = c(ligne("", "\\multicolumn{4}{c}{Propriétaires}", "\\multicolumn{4}{c}{Locataires}"),
+             "\\cmidrule(lr){2-5}\\cmidrule(lr){6-9}",
+             ligne("", rep(c("Fait", "Prêt", "Pas prêt", "Non conc."), 2))),
+  corps = c(groupe("\\textit{Gestes du quotidien}", 9), lignes_gestes("quotidien"),
+            espace("4pt"),
+            groupe("\\textit{Investissements}", 9), lignes_gestes("investissement")),
+  note = paste(
+    "Répartition pondérée des réponses, en \\%, parmi les titulaires d'un contrat qui ont répondu autre",
+    "chose que \\og ne sait pas\\fg{}. Non conc. : non concerné."
+  ),
+  taille = "scriptsize"
+)
+
+### Tableau : les trois étapes
+
+etapes <- lire(pratiques, "02_coefficients_etapes.csv")
+tests_etapes <- lire(pratiques, "03_tests_blocs.csv")
+colonnes_etapes <- expand_grid(famille = c("quotidien", "investissement"), etape = c("concerne", "fait", "refus"))
+termes_etapes <- c(statutLocataire = "Locataire", logementAppartement = "Appartement",
+                   "revenu< 1 000" = "Moins de 1\\,000\\,€", "revenu4 000 et +" = "4\\,000\\,€ et plus",
+                   interet_energie = "Intérêt pour l'énergie (1-5)", lev_sobriete = "Sobriété comme levier (0-5)")
+corps <- unlist(map(names(termes_etapes), function(te) {
+  x <- colonnes_etapes |> left_join(filter(etapes, terme == te), by = c("famille", "etape"))
+  lignes_coefficients(retrait(termes_etapes[[te]]), x$estimation, x$p, x$se, dec = 1)
+}))
+pied <- colonnes_etapes |> left_join(distinct(etapes, famille, etape, n_gestes, n_repondants), by = c("famille", "etape"))
+p_bloc <- function(b) {
+  colonnes_etapes |> left_join(filter(tests_etapes, bloc == b), by = c("famille", "etape")) |> pull(p) |> p_valeur()
+}
+ecrire_tableau(
+  tex("pratiques_etapes"),
+  titre = "Pouvoir agir, agir, refuser : les trois étapes des gestes",
+  etiquette = "pratiques_etapes",
+  colonnes = "l*{6}{c}",
+  espacement = "4pt",
+  entete = c(ligne("", "\\multicolumn{3}{c}{Gestes du quotidien}", "\\multicolumn{3}{c}{Investissements}"),
+             "\\cmidrule(lr){2-4}\\cmidrule(lr){5-7}",
+             ligne("", rep(c("Concerné", "A fait", "Refuse"), 2))),
+  corps = c(groupe("Logement et revenu", 7), corps[1:8], espace("2pt"),
+            groupe("Dispositions", 7), corps[9:12],
+            "\\midrule",
+            ligne("Gestes $\\times$ répondants", effectif(pied$n_gestes)),
+            ligne("Répondants", effectif(pied$n_repondants)),
+            ligne("Logement, $p$", p_bloc("Logement (statut et type)")),
+            ligne("Dispositions, $p$", p_bloc("Dispositions"))),
+  note = paste(
+    "Modèle séquentiel : chaque colonne porte sur ceux qui ont franchi l'étape précédente. Concerné : ne pas",
+    "répondre \\og non concerné\\fg{} (tous) ; a fait : parmi les concernés ; refuse : \\og pas prêt\\fg{} plutôt",
+    "que \\og prêt\\fg{}, parmi les concernés qui ne l'ont pas fait. Une ligne par répondant et par geste ;",
+    "moindres carrés pondérés avec un effet fixe de geste, coefficients en points de pourcentage, écarts-types",
+    "entre parenthèses, robustes à la présence de plusieurs gestes par répondant. Contrôles : âge, sexe, diplôme,",
+    "difficultés à payer, zone, vague. Références : propriétaire, maison, revenu de 1\\,500 à 2\\,500\\,€.",
+    "Logement, dispositions : $p$ du test de Wald de nullité jointe. Titulaires d'un contrat.", LEGENDE_ETOILES
+  ),
+  taille = "scriptsize"
+)
+
+### Tableau : l'autoconsommation
+
+autoconso <- lire(pratiques, "05_autoconsommation_coefficients.csv")
+tests_autoconso <- lire(pratiques, "06_autoconsommation_tests_blocs.csv")
+termes_autoconso <- c(logementAppartement = "Appartement (réf. : maison)",
+                      statutLocataire = "Locataire (réf. : propriétaire)",
+                      "autoconso_connueAucune" = "Ne connaît aucune forme d'autoconsommation",
+                      "autoconso_connueLes deux formes" = "Connaît les deux formes",
+                      interet_energie = "Intérêt pour l'énergie (1-5)",
+                      "territoiresAdapter au territoire" = "Adapter le service à chaque territoire",
+                      enc_porteur = "Encouragement : un porteur de confiance",
+                      enc_cle_en_main = "Encouragement : une offre clé en main",
+                      enc_economies = "Encouragement : des économies garanties")
+corps <- unlist(map(names(termes_autoconso), function(te) {
+  x <- tibble(etape = c("interesse", "collectif")) |> left_join(filter(autoconso, terme == te), by = "etape")
+  lignes_coefficients(retrait(termes_autoconso[[te]]), x$estimation, x$p, x$se, dec = 1)
+}))
+blocs_autoconso <- c("Logement", "Connaissance et intérêt", "Solidarité territoriale", "Encouragements")
+lignes_p <- map_chr(blocs_autoconso, function(b) {
+  x <- tibble(etape = c("interesse", "collectif")) |> left_join(filter(tests_autoconso, bloc == b), by = "etape")
+  ligne(paste0(b, ", $p$"), p_valeur(x$p))
+})
+ecrire_tableau(
+  tex("pratiques_autoconsommation"),
+  titre = "Qui s'intéresse à l'autoconsommation, et qui préfère le collectif ?",
+  etiquette = "pratiques_autoconsommation",
+  colonnes = "lcc",
+  entete = ligne("", "Intéressé", "Préfère le collectif"),
+  corps = c(corps, "\\midrule",
+            ligne("$n$", effectif(tests_autoconso$n[match(c("interesse", "collectif"), tests_autoconso$etape)])),
+            lignes_p),
+  note = paste(
+    "Intéressé : préférer l'autoconsommation individuelle ou collective, plutôt qu'aucune ou \\og ne sait",
+    "pas\\fg{}. Préfère le collectif : parmi les intéressés. Moindres carrés pondérés, en points de pourcentage,",
+    "écarts-types entre parenthèses. Contrôles : âge, sexe, diplôme, revenu, difficultés à payer, zone, vague,",
+    "connaissance du réseau, et une indicatrice des \\og ne sait pas\\fg{} aux encouragements et aux territoires.",
+    "Lignes en $p$ : test de Wald de nullité jointe du bloc. Titulaires d'un contrat.", LEGENDE_ETOILES
+  ),
+  taille = "scriptsize"
+)
+
+
+##############################
+### 7. Préférer et écarter ###
+##############################
+
+gouts <- file.path(sorties, "Goûts et dégoûts")
+paires  <- lire(gouts, "02_paires.csv")
+frequences <- lire(gouts, "01_preferees_et_ecartees.csv")
+courts <- c("Nucléaire" = "Nucléaire", "Renouvelables" = "Renouv.", "Sobriété" = "Sobriété",
+            "Efficacité" = "Efficacité", "Mobilités vertes" = "Mobilités", "Optimiser le réseau" = "Réseau",
+            "Solaire" = "Solaire", "Éolien" = "Éolien", "Hydraulique" = "Hydraul.",
+            "Gaz renouvelables" = "Gaz renouv.")
+
+# Le panneau d'un classement : en ligne l'option écartée, en colonne l'option
+# préférée. Les rapports marqués (au moins 1,3 ou au plus 0,7) sont en gras.
+panneau <- function(k, titre) {
+  options <- frequences |> filter(classement == k) |> pull(option)
+  vides <- rep("", 6 - length(options))
+  en_tete <- ligne(paste0("\\textbf{", titre, "}"), paste0("\\textit{", courts[options], "}"), vides,
+                   "\\textit{Écartée (\\%)}")
+  lignes <- map_chr(options, function(b) {
+    valeurs <- map_chr(options, function(a) {
+      if (a == b) return("--")
+      r <- paires$rapport[paires$classement == k & paires$prefere == a & paires$ecarte == b]
+      if (r >= 1.3 || r <= 0.7) paste0("\\textbf{", nombre(r, 1), "}") else nombre(r, 1)
+    })
+    ligne(retrait(b), valeurs, vides, nombre(frequences$ecartee[frequences$classement == k & frequences$option == b], 0))
+  })
+  c(en_tete, lignes,
+    ligne(retrait("\\textit{Classée première (\\%)}"),
+          nombre(frequences$premiere[frequences$classement == k], 0), vides, ""))
+}
+ecrire_tableau(
+  tex("gouts_paires"),
+  titre = "Préférer une option, écarter une autre",
+  etiquette = "gouts_paires",
+  colonnes = "l*{7}{c}",
+  espacement = "4pt",
+  entete = NULL,
+  corps = c(panneau("leviers", "A. Leviers"), "\\midrule", panneau("productions", "B. Productions")),
+  note = paste(
+    "Lecture : ceux qui classent le nucléaire premier levier écartent les renouvelables 1,4 fois plus",
+    "souvent qu'attendu si leur préférence ne disait rien de leur rejet. En colonne, l'option classée",
+    "première ; en ligne, l'option écartée. La part attendue d'écarter B quand on préfère A vaut",
+    "$m\\,r_B/(m-r_A)$, où $r_X$ est la part des répondants qui écartent X et $m$ le nombre d'options",
+    "écartées par répondant. En gras, les rapports d'au moins 1,3 ou d'au plus 0,7. Répondants qui ont",
+    "rempli tout le classement : 1\\,921 pour les leviers (cinq rangs sur six, $m = 1$), 2\\,473 pour les",
+    "productions (trois rangs sur cinq, $m = 2$). Parts pondérées."
+  ),
+  taille = "scriptsize"
+)
+lignes <- readLines(tex("gouts_paires"))
+premier <- which(lignes == "\\midrule")[1]
+writeLines(lignes[-premier], tex("gouts_paires"))
+
+
+########################
+### 8. La robustesse ###
+########################
+
+robustesse <- file.path(sorties, "Robustesse")
+predictif <- lire(robustesse, "01_capacite_predictive.csv")
+
+libelles_predictif <- c(
+  local = "Gestion décentralisée", concurrence = "Concurrence", solidarite_pts = "Même service partout",
+  pro_nucleaire_pts = "Pro-nucléaire", malus_pts = "Malus acceptable", offre_verte_pts = "Offre verte souscrite",
+  gestes_part_pts = "Gestes",
+  def_organisme = "Définition : organisme", def_mission = "Définition : mission",
+  sp_acces_pts = "Accès garanti", sp_controle_pts = "Règles publiques", sp_egalite_pts = "Égalité",
+  sp_sans_profit_pts = "Absence de profit", sp_solidarite_pts = "Solidarité",
+  garant_etat_pts = "Garant : l'État", garant_collectivites_pts = "Garant : les collectivités",
+  garant_ent_publiques_pts = "Garant : entreprises publiques", garant_ent_privees_pts = "Garant : entreprises privées",
+  garant_individus_pts = "Garant : les individus",
+  mesure_bonus_pts = "Bonus", mesure_malus_pts = "Malus", mesure_invest_public_pts = "Investissement public",
+  mesure_regulation_pts = "Régulation", mesure_information_pts = "Information", nb_mesures = "Nombre de mesures",
+  lev_sobriete_score = "Levier : sobriété", lev_efficacite_score = "Levier : efficacité",
+  lev_renouvelables_score = "Levier : renouvelables", lev_nucleaire_score = "Levier : nucléaire",
+  lev_mobilites_score = "Levier : mobilités vertes", lev_reseau_score = "Levier : réseau",
+  "quotidien : concerne" = "Gestes du quotidien : concerné", "quotidien : fait" = "Gestes du quotidien : a fait",
+  "quotidien : refus" = "Gestes du quotidien : refuse", "investissement : concerne" = "Investissements : concerné",
+  "investissement : fait" = "Investissements : a fait", "investissement : refus" = "Investissements : refuse",
+  interesse = "Autoconsommation : intéressé", collectif = "Autoconsommation : préfère le collectif"
+)
+lignes_predictif <- function(m) {
+  x <- predictif |> filter(modele %in% m)
+  pmap_chr(x, function(modele, variable, n, r2_echantillon, r2_lineaire_test, r2_foret_test, ...) {
+    libelle <- if (modele == "D") "Offre verte (bloc D)" else libelles_predictif[[variable]]
+    ligne(retrait(libelle), effectif(n), nombre(r2_echantillon, 3), nombre(r2_lineaire_test, 3),
+          nombre(r2_foret_test, 3))
+  })
+}
+ecrire_tableau(
+  tex("robustesse_predictif"),
+  titre = "Ce que les modèles prédisent sur des répondants qu'ils n'ont pas vus",
+  etiquette = "robustesse_predictif",
+  colonnes = "lr*{3}{c}",
+  espacement = "5pt",
+  entete = c(ligne("", "", "R\\textsuperscript{2}", "\\multicolumn{2}{c}{R\\textsuperscript{2} en validation croisée}"),
+             "\\cmidrule(lr){4-5}",
+             ligne("", "$n$", "habituel", "Régression", "Forêt aléatoire")),
+  corps = c(groupe("\\textbf{A.} Positions (bloc F)", 5), lignes_predictif("F"), espace("4pt"),
+            groupe("\\textbf{B.} Perceptions du service public (P3)", 5), lignes_predictif("P3"), espace("4pt"),
+            groupe("\\textbf{C.} Instruments de la transition (I3)", 5), lignes_predictif("I3"), espace("4pt"),
+            groupe("\\textbf{D.} Pratiques", 5), lignes_predictif(c("D", "Gestes", "Autoconsommation"))),
+  note = paste(
+    "R\\textsuperscript{2} habituel : sur les répondants qui ont servi à estimer le modèle. Validation croisée :",
+    "on estime le modèle sur quatre cinquièmes de l'échantillon, on prédit le cinquième restant, et on",
+    "recommence cinq fois ; le R\\textsuperscript{2} porte sur l'ensemble de ces prévisions (pondéré). Un",
+    "R\\textsuperscript{2} négatif veut dire que le modèle prédit moins bien que la simple moyenne. Forêt",
+    "aléatoire : 300 arbres, mêmes variables explicatives, sans interaction écrite. Spécifications : celles",
+    "des modèles F (tableau~\\ref{tab:reg_shapley}), P3 et I3 (Antoine), du bloc D et du modèle séquentiel",
+    "des gestes (tableau~\\ref{tab:pratiques_etapes}) ; pour les gestes, les cinq parts séparent des",
+    "répondants, et non des gestes."
+  ),
+  taille = "scriptsize"
+)
+
+### Tableau : les blocs selon la forêt et selon Shapley
+
+accord <- lire(robustesse, "03_accord_foret_shapley.csv")
+corps <- map_chr(names(ordre_positions)[names(ordre_positions) %in% accord$variable], function(y) {
+  a <- accord |> filter(variable == y)
+  ligne(ordre_positions[[y]], a$premier_shapley, a$premier_foret, nombre(a$correlation_rangs, 2))
+})
+ecrire_tableau(
+  tex("robustesse_shapley"),
+  titre = "Le poids des blocs selon deux méthodes",
+  etiquette = "robustesse_shapley",
+  colonnes = "lllc",
+  entete = c(ligne("", "\\multicolumn{2}{c}{Premier bloc}", ""),
+             "\\cmidrule(lr){2-3}",
+             ligne("", "Shapley", "Forêt aléatoire", "Corrélation des rangs")),
+  corps = corps,
+  note = paste(
+    "Modèle F. Shapley : décomposition du R\\textsuperscript{2} du tableau~\\ref{tab:reg_shapley}. Forêt",
+    "aléatoire : importance par permutation (dégradation de la prévision quand on mélange au hasard une",
+    "variable), additionnée par bloc. Corrélation des rangs : corrélation de Spearman entre les deux",
+    "classements des sept blocs. Rapport à l'énergie : connaissance du réseau et intérêt pour l'énergie."
+  )
+)
+
+### Tableau : la cohérence des opinions, corrigée de la mesure
+
+mesure <- lire(robustesse, "04_coherence_corrigee.csv")
+corps <- pmap_chr(mesure, function(methode, fiabilite, dans_un_bloc, entre_les_blocs, plus_forte_entre) {
+  libelle <- if (methode == "Pearson") "Corrélations de Pearson" else if (fiabilite == 1)
+    "Corrélations polychoriques" else retrait(paste0("corrigées, fiabilité de ", nombre(fiabilite, 1)))
+  ligne(libelle, nombre(dans_un_bloc, 2), nombre(entre_les_blocs, 2), nombre(plus_forte_entre, 2))
+})
+ecrire_tableau(
+  tex("robustesse_mesure"),
+  titre = "La cohérence des opinions, selon la façon de la mesurer",
+  etiquette = "robustesse_mesure",
+  colonnes = "l*{3}{c}",
+  entete = c(ligne("", "\\multicolumn{2}{c}{Variance partagée (\\%)}", "Plus forte corrélation"),
+             "\\cmidrule(lr){2-3}",
+             ligne("", "Dans un bloc", "Entre deux blocs", "entre deux blocs")),
+  corps = corps,
+  note = paste(
+    "Les treize questions du tableau~\\ref{tab:coherence_correlations}, sur les 2\\,154 répondants qui ont",
+    "répondu aux treize (corrélations non pondérées). Variance partagée : r\\textsuperscript{2} moyen entre",
+    "deux questions. Corrélations polychoriques : adaptées à des réponses ordinales ou binaires. Corrigées :",
+    "si chaque question ne mesure l'opinion qu'avec une fiabilité $f$, la vraie corrélation vaut $r/f$. Repère :",
+    "les deux classements du nucléaire, qui mesurent la même opinion, sont corrélés à 0,68."
   )
 )
 
